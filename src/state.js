@@ -77,3 +77,20 @@ export function recordDeath(summary) {
   } catch (e) {}
 }
 export function graves() { try { return JSON.parse(localStorage.getItem('ar_graves') || '[]'); } catch (e) { return []; } }
+
+// ---------------------------------------------------------------- Renown (meta progression across runs)
+export const UNLOCKS = [
+  { at: 40, id: 'purse', name: 'Coin Purse', desc: 'Start with +40 gold' },
+  { at: 120, id: 'kit', name: 'Veteran Kit', desc: 'Start with an Iron weapon' },
+  { at: 220, id: 'friend', name: 'Old Friend', desc: 'Start with a companion' },
+  { at: 350, id: 'choice', name: 'Wide Road', desc: 'Choose from 4 heroes instead of 3' },
+  { at: 500, id: 'blessed', name: 'Blessed Blood', desc: 'Your hero starts with +6 max HP' },
+  { at: 750, id: 'map', name: 'Treasure Map', desc: 'Lairs and Guardians are marked from the start' },
+];
+export function renown() { try { return +(localStorage.getItem('ar_renown') || 0); } catch (e) { return 0; } }
+export function addRenown(n) { try { localStorage.setItem('ar_renown', String(renown() + n)); } catch (e) {} }
+export const unlocked = (id) => { const u = UNLOCKS.find((x) => x.id === id); return u && renown() >= u.at; };
+export function runRenown(legend = false) {
+  const h = G.party.find((u) => u.hero);
+  return Math.round(G.stats.kills * 1 + G.stats.battles * 2 + day() * 3 + (G.flags.guardians || 0) * 60 + (legend ? 250 : 0) + (h ? h.level * 5 : 0));
+}

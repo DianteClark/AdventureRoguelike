@@ -127,6 +127,7 @@ export const POI_ART = {
   denDome: { sheet: 'towers', sx: 18, sy: 0, w: 2, h: 2, ax: 0, ay: 1 },
   denRed: { sheet: 'towers', sx: 18, sy: 2, w: 2, h: 2, ax: 0, ay: 1 },
   denCrystal: { sheet: 'towers', sx: 18, sy: 4, w: 2, h: 2, ax: 0, ay: 1 },
+  bossArea: { sheet: 'house', sx: 0, sy: 0, w: 3, h: 2, ax: 1, ay: 1, invisible: true },
 };
 
 export const sheet = (key) => img(SHEETS[key]);

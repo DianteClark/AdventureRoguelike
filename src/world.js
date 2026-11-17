@@ -392,6 +392,7 @@ export function drawWorldObjects(extraDrawables, opts = {}) {
   for (const p of w.pois) {
     if (p.gone || p.x < r.x0 - 4 || p.x > r.x1 + 4 || p.y < r.y0 - 1 || p.y > r.y1 + 4) continue;
     if (!opts.battle && !w.explored[idx(p.x, p.y)]) continue;
+    if (opts.battle && p.type === 'boss') continue;
     list.push(poiDrawable(p));
   }
   if (!opts.battle) {
@@ -429,6 +430,24 @@ function poiDrawable(p) {
         if (Math.floor(animT * 2) % 2 === 0) drawIcon('Ui/Emote/emote20.png', p.x * TILE + 2, p.y * TILE - 15, 12);
       },
     };
+  }
+  if (p.type === 'boss') {
+    return {
+      z: (p.y + 1) * TILE + 0.5, draw: () => {
+        if (p.cleared) { drawIcon('Ui/Emote/emote29.png', p.x * TILE + 2, p.y * TILE - 6, 12); return; }
+        drawActor({ kind: 'boss', name: p.boss }, p.x * TILE, p.y * TILE, 0, 0, { ring: `rgba(255,40,80,${0.35 + Math.sin(animT * 3) * 0.15})` });
+        drawIcon('Ui/Emote/emote22.png', p.x * TILE + 2, p.y * TILE - 46 + Math.sin(animT * 4) * 2, 12);
+      },
+    };
+  }
+  if (p.type === 'skygate') {
+    return poiArtDrawable('torii', p.x, p.y, () => {
+      if (!p.locked) {
+        const k = (Math.sin(animT * 3) + 1) / 2;
+        drawText('✦', p.x * TILE + 8, (p.y - 1) * TILE + 6, `rgba(255,220,120,${0.5 + k * 0.5})`, 10);
+      }
+      drawText(p.locked ? 'Sky Gate (sealed)' : 'SKY GATE', p.x * TILE + 8, (p.y - 2) * TILE + 4, p.locked ? '#9fb4ff' : '#ffd27a', 6, 0.9);
+    }, p.locked);
   }
   const faded = (p.type === 'shrine' && p.used) || (p.type === 'den' && p.cleared);
   return poiArtDrawable(p.art, p.x, p.y, () => {

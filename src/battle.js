@@ -1,13 +1,13 @@
 // Tactical grid battles fought on the overworld terrain where the encounter happened.
 import { G, hero, saveRun } from './state.js';
-import { TILE, MONSTERS, BANDITS, FAMILY_FX, STATUS, SKILLS, monsterOnHit } from './data.js';
+import { TILE, MONSTERS, BANDITS, FAMILY_FX, STATUS, SKILLS, monsterOnHit, BOSSES } from './data.js';
 import { OBJECTS, TERR } from './tiles.js';
 import { DIRS, reachable, pathFromReach, manhattan } from './grid.js';
 import {
   view, ctx, drawGround, drawActor, drawHpBar, fillTile, strokeTile, drawFx, drawText, toWorldTile, drawIcon,
 } from './render.js';
 import { drawWorldObjects, tileBlocked } from './world.js';
-import { stats, maxHp, makeMonster, makeBandit, gainXp } from './units.js';
+import { stats, maxHp, makeMonster, makeBandit, gainXp, makeBoss } from './units.js';
 import { playMusic, sfx } from './assets.js';
 import { rand } from './rng.js';
 import * as screens from './screens.js';
@@ -63,10 +63,10 @@ export function startBattle(opts) {
     const t = take(pt); if (!t) break;
     units.push(wrap(u, 'player', t));
   }
-  const foes = opts.members.map((m) => {
+  const foes = (opts.boss ? [makeBoss(opts.boss)] : []).concat(opts.members.map((m) => {
     if (m.type === 'bandit') return makeBandit(BANDITS.find((d) => d.sprite === m.key), m.level);
     return makeMonster(m.key, m.level);
-  });
+  }));
   let et = tiles.filter((t) => dA(t) < dP(t) && units.every((pu) => manhattan(pu, t) >= 3)).sort((a, b) => dA(a) - dA(b));
   if (et.length < foes.length) et = tiles.filter((t) => units.every((pu) => manhattan(pu, t) >= 2)).sort((a, b) => dA(a) - dA(b));
   if (et.length < foes.length) et = tiles.slice().sort((a, b) => dA(a) - dA(b));
@@ -94,7 +94,7 @@ export function startBattle(opts) {
   G.scene = 'battle';
   G.stats.battles++;
   fitCamera();
-  playMusic(rand.chance(0.5) ? 'battle' : 'battle2');
+  playMusic(opts.music || (rand.chance(0.5) ? 'battle' : 'battle2'));
   screens.renderHud();
   B.busy = true;
   renderBattleUi();
@@ -109,14 +109,16 @@ function wrap(u, team, t) {
   return {
     u, team, x: t.x, y: t.y, rx: t.x * TILE, ry: t.y * TILE, dir: team === 'player' ? 1 : 0,
     moved: false, acted: false, lastStandUsed: false, flash: 0, pose: null, lunge: null, dead: false, st: {}, cd: 0,
-    sprite: u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite },
+    sprite: u.kind === 'boss' ? { kind: 'boss', name: u.boss } : u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite },
+    isBoss: u.kind === 'boss',
   };
 }
 
 export function fitCamera() {
   if (!B) return;
   const portrait = window.innerHeight >= window.innerWidth;
-  const top = 64 * view.dpr, bottom = (portrait ? 150 : 80) * view.dpr;
+  const hasBoss = B.units.some((b) => b.isBoss);
+  const top = (hasBoss ? 118 : 64) * view.dpr, bottom = (portrait ? 150 : 80) * view.dpr;
   const availH = view.h - top - bottom, availW = view.w - 8 * view.dpr;
   view.S = Math.max(1, Math.floor(Math.min(availW / (B.rect.w * TILE), availH / (B.rect.h * TILE))));
   const pw = B.rect.w * TILE * view.S, ph = B.rect.h * TILE * view.S;
@@ -215,7 +217,7 @@ function dealDamage(target, dmg, source) {
 async function strike(att, def, info, isCounter = false) {
   const a = bstats(att);
   const fam = a.family;
-  let fxKind = info.fxKind || (att.u.monster ? MONSTERS[att.u.monster].fx : (FAMILY_FX[fam] || 'slash'));
+  let fxKind = info.fxKind || (att.u.boss ? BOSSES[att.u.boss].fx : att.u.monster ? MONSTERS[att.u.monster].fx : (FAMILY_FX[fam] || 'slash'));
   face(att, def);
   att.pose = 'attack';
   const ranged = manhattan(att, def) > 1;
@@ -246,7 +248,7 @@ async function strike(att, def, info, isCounter = false) {
       else blood(cx, cy);
       floatText(def, crit ? `${dmg}!` : `${dmg}`, crit ? '#ffd27a' : '#ffffff', crit ? 12 : 9);
       if (!killed) {
-        const oh = att.u.monster ? monsterOnHit(att.u.monster) : null;
+        const oh = att.u.boss ? BOSSES[att.u.boss].onHit : att.u.monster ? monsterOnHit(att.u.monster) : null;
         if (oh && rand.next() < oh[1]) applyStatus(def, oh[0], oh[2]);
         if (info.status) applyStatus(def, info.status[0], info.status[1], info.status[2] || 0);
       }
@@ -522,6 +524,8 @@ async function endPlayerTurn() {
     if (e.st && e.st.stun) { floatText(e, 'Stunned', '#ffe27a', 6); await wait(350); continue; }
     await enemyAct(e);
     if (checkEnd()) return;
+    if (e.isBoss && !e.dead && !e.charging && !e.justReleased && B.turn % 2 === 1) bossCharge(e);
+    e.justReleased = false;
   }
   if (!B || B.over) return;
   decStatuses('enemy');
@@ -557,6 +561,7 @@ async function turnStartEffects(team) {
 }
 
 async function enemyAct(e) {
+  if (e.isBoss && await bossTurn(e)) return;
   if (await enemyTrySkill(e)) return;
   const s = bstats(e);
   const reach = moveReach(e);
@@ -697,6 +702,7 @@ export function renderBattleUi() {
     healAmount: B.fHeal && B.sel ? Math.max(4, Math.round(bstats(B.sel).atk * 1.1)) : 0,
     canUndo: B.state === 'action' && B.sel && B.origin && (B.sel.x !== B.origin.x || B.sel.y !== B.origin.y),
     turn: B.turn,
+    noRetreat: !!B.opts.noRetreat,
     skill: B.sel && B.sel.team === 'player' ? skillOf(B.sel) : null,
     skillCd: B.sel ? B.sel.cd : 0,
     onSkill: () => beginSkill(),
@@ -777,6 +783,10 @@ export function battleRender() {
     for (const t of B.skillTiles) { fillTile(t.x, t.y, `rgba(190,100,255,${0.42 + Math.sin(time * 6) * 0.1})`); strokeTile(t.x, t.y, 'rgba(230,190,255,0.7)', 0.6); }
     if (B.skillHover) for (const t of B.skillHover) strokeTile(t.x, t.y, '#ffd27a', 1);
   }
+  for (const bb of B.units) {
+    if (!bb.isBoss || bb.dead || !bb.charging) continue;
+    for (const t of bb.danger) { fillTile(t.x, t.y, `rgba(255,40,40,${0.25 + Math.sin(time * 8) * 0.12})`); strokeTile(t.x, t.y, 'rgba(255,120,100,0.8)', 0.6); }
+  }
   if (B.sel) strokeTile(B.sel.x, B.sel.y, `rgba(255,220,100,${0.6 + Math.sin(time * 6) * 0.3})`, 1.2);
   if (B.fTarget) strokeTile(B.fTarget.x, B.fTarget.y, '#ffffff', 1.2);
 
@@ -838,6 +848,7 @@ export function battleRender() {
     const rise = (1 - Math.pow(1 - Math.min(1, t.t * 1.6), 3)) * 12;
     drawText(t.text, t.x, t.y - rise, t.color, t.size * pop, Math.min(1, 2.2 - t.t * 2.2));
   }
+  drawBossBar();
   // danger vignette when the leader is low
   const hb = B.units.find((b) => b.u.hero && !b.dead);
   if (hb && hb.u.hp / maxHp(hb.u) < 0.3) {
@@ -1061,4 +1072,99 @@ async function enemyTrySkill(e) {
   if (sk.id === 'rally' && alive('enemy').filter((a) => manhattan(a, e) <= 3).length >= 3) { await executeSkill(e, sk, null); return true; }
   if (sk.id === 'sanctuary' && alive('enemy').some((a) => manhattan(a, e) <= 2 && a.u.hp < maxHp(a.u) * 0.6)) { await executeSkill(e, sk, null); return true; }
   return false;
+}
+
+
+// ------------------------------------------------------------------ Bosses
+const SPECIAL = {
+  quake:    { name: 'Earthbreaker', radius: 2, mult: 0.8, status: ['stun', 0.4, 1], fx: 'quake', color: '#ffb45a', sfx: 'slam' },
+  blizzard: { name: 'White Death', radius: 3, mult: 0.6, magic: true, status: ['chill', 0.9, 2], fx: 'ice', color: '#9fdcff', sfx: 'magic2' },
+  inferno:  { name: 'Inferno', radius: 2, mult: 0.75, magic: true, status: ['burn', 0.8, 2], fx: 'fire', color: '#ff9b3b', sfx: 'fire' },
+  storm:    { name: 'Thunder Judgment', targets: 3, mult: 0.9, magic: true, status: ['stun', 0.3, 1], fx: 'thunder', color: '#ffe27a', sfx: 'explosion' },
+};
+
+function bossCharge(e) {
+  const d = BOSSES[e.u.boss], sp = SPECIAL[d.special];
+  e.charging = true;
+  if (sp.targets) {
+    e.danger = alive('player').sort(() => Math.random() - 0.5).slice(0, sp.targets).map((p) => ({ x: p.x, y: p.y }));
+  } else {
+    e.danger = [];
+    for (let y = B.rect.y; y < B.rect.y + B.rect.h; y++) for (let x = B.rect.x; x < B.rect.x + B.rect.w; x++) {
+      const dd = manhattan({ x, y }, e);
+      if (dd >= 1 && dd <= sp.radius) e.danger.push({ x, y });
+    }
+  }
+  banner(`${d.short} gathers power...`, { color: sp.color, sub: `${sp.name} next turn — get out of the red!`, dur: 1.6, size: 0.6 });
+  sfx('strange', 0.6);
+}
+
+async function bossTurn(e) {
+  const d = BOSSES[e.u.boss], sp = SPECIAL[d.special];
+  const frac = e.u.hp / maxHp(e.u);
+  if (!e.summoned && frac < 0.55) {
+    e.summoned = true;
+    banner('REINFORCEMENTS', { color: '#ff7a6b', sub: `${d.short} calls for aid`, dur: 1.3, size: 0.7 });
+    sfx('alert', 0.7);
+    const spots = [...reachable(e.x, e.y, 4, (x, y) => terrainOk(x, y, false)).values()].filter((n) => n.d > 0 && !unitAt(n.x, n.y));
+    for (let i = 0; i < 2 && spots.length; i++) {
+      const t = spots.splice(Math.floor(Math.random() * Math.min(6, spots.length)), 1)[0];
+      const m = makeMonster(rand.pick(d.minions), Math.max(1, d.level - 3));
+      const w = wrap(m, 'enemy', t);
+      w.acted = true;
+      B.units.push(w);
+      smokePuff(t.x * TILE + 8, t.y * TILE + 8, '#a080c0', 12);
+    }
+    await wait(700);
+  }
+  if (!e.enraged && frac < 0.3) {
+    e.enraged = true;
+    applyStatus(e, 'atkUp', 99, 4);
+    banner('ENRAGED!', { color: '#ff3a3a', sub: `${d.short} fights with fury`, dur: 1.3, size: 0.8 });
+    flash('#ff2a2a', 0.35, 0.3); shake(5, 0.4);
+    await wait(600);
+  }
+  if (!e.charging) return false;
+  // release the special
+  e.charging = false; e.justReleased = true;
+  const zone = e.danger || [];
+  e.danger = [];
+  banner(sp.name.toUpperCase(), { color: sp.color, dur: 1.0, size: 0.8 });
+  sfx(sp.sfx, 0.9); shake(8, 0.6); flash(sp.color, 0.3, 0.25); hitstop(120);
+  if (d.special === 'quake') B.fx.push({ kind: 'quake', x: e.x, y: e.y - 0.5, t: 0, dur: 0.7 });
+  for (const t of zone) if (Math.random() < 0.45 || unitAt(t.x, t.y)) B.fx.push({ kind: sp.fx, x: t.x, y: t.y, t: 0, dur: 0.6 });
+  await wait(350);
+  for (const t of zone) {
+    const p = unitAt(t.x, t.y);
+    if (!p || p.team !== 'player') continue;
+    const ps = bstats(p), es = bstats(e);
+    const def = sp.magic ? Math.floor(ps.def / 2) : ps.def;
+    const dmg = Math.max(1, Math.round((es.atk - def) * sp.mult * rand.float(0.9, 1.1)));
+    const killed = dealDamage(p, dmg, e);
+    p.flash = 0.3;
+    floatText(p, `${dmg}`, sp.color, 10);
+    burst(p.x * TILE + 8, p.y * TILE + 8, { n: 14, colors: [sp.color, '#fff'], speed: 90, life: 0.5, g: 120, size: 1.6, glow: true });
+    if (killed) await kill(p, e);
+    else if (rand.next() < sp.status[1]) applyStatus(p, sp.status[0], sp.status[2]);
+  }
+  await wait(500);
+  return true;
+}
+
+function drawBossBar() {
+  const bb = B.units.find((b) => b.isBoss && !b.dead);
+  if (!bb) return;
+  const d = view.dpr, W = view.w;
+  const w = Math.min(W - 24 * d, 520 * d), x = (W - w) / 2, y = 92 * d, h = 12 * d;
+  const frac = bb.u.hp / maxHp(bb.u);
+  bb.barShown = bb.barShown == null ? frac : bb.barShown + (frac - bb.barShown) * 0.08;
+  ctx.fillStyle = 'rgba(14,10,22,0.85)';
+  ctx.fillRect(x - 4 * d, y - 18 * d, w + 8 * d, h + 24 * d);
+  ctx.font = `${Math.round(13 * d)}px Ninja, monospace`;
+  ctx.textAlign = 'left'; ctx.fillStyle = bb.enraged ? '#ff5a4a' : '#ffd27a';
+  ctx.fillText(bb.u.name + (bb.charging ? '  ⚠ charging' : ''), x, y - 4 * d);
+  ctx.fillStyle = '#2a1414'; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#f0e0b0'; ctx.fillRect(x, y, w * Math.max(0, bb.barShown), h);
+  ctx.fillStyle = bb.enraged ? '#ff3a3a' : '#d8324a'; ctx.fillRect(x, y, w * frac, h);
+  ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = d; ctx.strokeRect(x, y, w, h);
 }

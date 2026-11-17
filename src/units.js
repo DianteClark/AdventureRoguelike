@@ -1,7 +1,7 @@
 // Items (weapons / gear / consumables) and units (heroes, recruits, monsters).
 import {
   WEAPONS, FAMILIES, TIER_POWER, TIERS, GEAR, GEAR_TIER_NAMES, WEAPON_TRAITS, GEAR_TRAITS, weaponBase, gearBase,
-  weaponIcon, BACKGROUNDS, NAMES, QUIRKS, MONSTERS, BANDITS, CONSUMABLES,
+  weaponIcon, BACKGROUNDS, NAMES, QUIRKS, MONSTERS, BANDITS, CONSUMABLES, BOSSES,
 } from './data.js';
 import { rand } from './rng.js';
 
@@ -181,7 +181,7 @@ function bonuses(u) {
 export const maxHp = (u) => u.base.hp + (bonuses(u).hp || 0);
 export function stats(u) {
   const b = bonuses(u);
-  const m = u.monster ? MONSTERS[u.monster] : null;
+  const m = u.monster ? MONSTERS[u.monster] : u.boss ? BOSSES[u.boss] : null;
   let range, family = null, magic = false, heals = false, twin = false, pierce = false, sunder = 0;
   if (m) { range = m.range.slice(); magic = !!m.magic; }
   else if (u.weapon) {
@@ -247,5 +247,15 @@ export function makeBandit(def, level, rng = rand) {
     weapon: makeWeapon(rng.pick(bg.weapons), Math.max(1, Math.min(5, Math.ceil(level / 2.5))), rng),
   });
   u.isBandit = true;
+  return u;
+}
+
+export function makeBoss(key) {
+  const d = BOSSES[key];
+  const u = {
+    id: newId(), name: d.label, team: 'enemy', kind: 'boss', sprite: key, boss: key, monster: null, level: d.level, xp: 0,
+    base: { hp: d.hp, atk: d.atk, def: d.def, mov: d.mov, acc: 5, dodge: 0, crit: 5 }, weapon: null, gear: null, hp: 0, alive: true, kills: 0,
+  };
+  u.hp = maxHp(u);
   return u;
 }

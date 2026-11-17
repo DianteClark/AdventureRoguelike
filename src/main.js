@@ -1,5 +1,5 @@
 // Boot, main loop, input routing, run lifecycle.
-import { G, saveRun, hasSave } from './state.js';
+import { G, saveRun, hasSave, unlocked } from './state.js';
 import { preload, unlockAudio, playMusic } from './assets.js';
 import { SHEETS } from './tiles.js';
 import { generateWorld } from './worldgen.js';
@@ -7,13 +7,14 @@ import { resize, view, buildGround, drawGround, ctx } from './render.js';
 import { enterWorld, worldUpdate, worldRender, worldTap, worldKey, computeFootprints, tileBlocked, drawWorldObjects, stopWalking, debugTeleport } from './world.js';
 import { startBattle, battleUpdate, battleRender, battleTap, fitCamera, battleActive, renderBattleUi } from './battle.js';
 import * as screens from './screens.js';
-import { makeHero, makeConsumable } from './units.js';
+import { makeHero, makeConsumable, makeWeapon, makeRecruit, maxHp } from './units.js';
+import { BACKGROUNDS } from './data.js';
 import { modalOpen } from './ui.js';
 import { TILE } from './data.js';
 import { updateJuice, applyShake, restoreShake, drawScreenFx, drawParticles, juice, particle, transition } from './fx.js';
 
 screens.bindApi({
-  newRun, resumeRun, returnToWorld, toTitle, startBattle, tileBlocked,
+  newRun, resumeRun, returnToWorld, toTitle, startBattle, tileBlocked, transition,
   refreshWorld: () => computeFootprints(),
   resumeWorldMusic: () => { if (G.scene === 'world') playMusic('world'); },
 });
@@ -26,6 +27,15 @@ function newRun(bgKey, sprite, name) {
   G.party = [h];
   G.bag = [makeConsumable('potion')];
   G.gold = 50;
+  // legacies earned in earlier runs
+  if (unlocked('purse')) G.gold += 40;
+  if (unlocked('kit')) h.weapon = makeWeapon(BACKGROUNDS[bgKey].weapons[0], 2);
+  if (unlocked('blessed')) { h.base.hp += 6; }
+  h.hp = maxHp(h);
+  if (unlocked('friend')) { const f = makeRecruit(1); f.quirk = 'Has followed you since the old days.'; G.party.push(f); }
+  if (unlocked('map')) for (const p of G.world.pois) if (p.type === 'den' || p.type === 'boss') {
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const x = p.x + dx, y = p.y + dy; if (x >= 0 && y >= 0 && x < G.world.W && y < G.world.H) G.world.explored[y * G.world.W + x] = 1; }
+  }
   G.steps = 0;
   G.flags = {};
   G.stats = { battles: 0, kills: 0, villages: 0, chests: 0, events: 0, fallen: [] };

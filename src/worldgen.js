@@ -151,6 +151,25 @@ export function generateWorld(seed) {
   }));
   add('chest', 12, 4, () => ({}));
   add('wanderer', 8, 5, () => ({ sprite: rng.pick(['OldMan', 'OldMan3', 'OldWoman', 'Monk2', 'Inspector', 'Noble', 'Sultan', 'Princess', 'Woman', 'Villager6', 'Eskimo', 'Master', 'Tengu', 'Child']) }));
+  // --- Guardians: the far reaches of each biome
+  const bossFor = [['oni', BIOME.GRASS], ['frost', BIOME.SNOW], ['ember', BIOME.SAND]];
+  for (const [key, bb] of bossFor) {
+    let best = null, bd = -1;
+    for (let t = 0; t < 2500; t++) {
+      const x = rng.int(4, W - 5), y = rng.int(5, H - 5);
+      if (biome[idx(x, y)] !== bb || !reachable(x, y) || blocked(x, y) || !farFromPois(x, y, 6)) continue;
+      const d = distStart(x, y);
+      if (d > bd) { bd = d; best = { x, y }; }
+    }
+    if (best) {
+      clearArea(best.x, best.y, 2);
+      pois.push({ id: `boss_${key}`, type: 'boss', boss: key, x: best.x, y: best.y, art: 'bossArea', cleared: false, biome: bb });
+    }
+  }
+  // --- the Sky Gate near the start, sealed until the guardians fall
+  const gate = findSpot((x, y) => reachable(x, y) && distStart(x, y) >= 3 && distStart(x, y) <= 8, 3) || findSpot((x, y) => reachable(x, y), 3);
+  if (gate) { clearArea(gate.x, gate.y, 1); pois.push({ id: 'skygate', type: 'skygate', x: gate.x, y: gate.y, art: 'torii', locked: true }); }
+
   // dens are guarded by strong groups; give them a tier
   for (const p of pois) if (p.type === 'den') p.tier = Math.min(5, tierAt(p.x, p.y, start, biome[idx(p.x, p.y)]) + 1);
   // block tiles under building art except the door tile

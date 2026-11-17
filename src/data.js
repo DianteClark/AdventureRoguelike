@@ -19,6 +19,7 @@ export const monsterSheet = (name) => `Actor/Monster/${name}/${MONSTER_FILE[name
 export const monsterFace = (name) => `Actor/Monster/${name}/Faceset.png`;
 
 export function spritePaths(sprite) {
+  if (sprite.kind === 'boss') { const b = BOSSES[sprite.name]; return { sheet: bossIdle(b), face: bossFace(b) }; }
   return sprite.kind === 'monster'
     ? { sheet: monsterSheet(sprite.name), face: monsterFace(sprite.name) }
     : { sheet: charSheet(sprite.name), face: charFace(sprite.name) };
@@ -309,3 +310,22 @@ export const SKILLS = {
 };
 
 export const CHAMPION_TITLES = ['Grim', 'Old', 'Red-Eyed', 'Mad', 'Iron', 'Hollow', 'Pale', 'Great', 'Cursed', 'Ancient', 'Bloodied', 'Howling'];
+
+// ---------------------------------------------------------------- Bosses
+// Drawn from their Idle strip (fw x height frames), native size, bottom-centered on their tile.
+export const BOSSES = {
+  oni:   { key: 'DemonCyclop', label: 'Gaki, Oni Warlord', short: 'Gaki', biome: 0, fw: 50, frames: 5, t: 5, level: 8,
+           hp: 130, atk: 11, def: 4, mov: 3, range: [1, 1], fx: 'heavy', special: 'quake', minions: ['Cyclope', 'Mushroom', 'Snake'],
+           onHit: ['stun', 0.25, 1], music: 'boss', title: 'Guardian of the Greenlands' },
+  frost: { key: 'GiantBlueSamurai', label: 'Hyōga, Frost Shogun', short: 'Hyōga', biome: 2, fw: 96, frames: 6, t: 5, level: 9,
+           hp: 140, atk: 12, def: 5, mov: 4, range: [1, 2], fx: 'ice', special: 'blizzard', minions: ['SkullBlue', 'Slime3', 'Larva2'],
+           onHit: ['chill', 0.5, 2], music: 'boss', title: 'Guardian of Frostreach' },
+  ember: { key: 'GiantFlam', label: 'Homura, Ember Colossus', short: 'Homura', biome: 1, fw: 50, frames: 5, t: 5, level: 9,
+           hp: 120, atk: 12, def: 3, mov: 3, range: [1, 3], fx: 'fire', magic: true, special: 'inferno', minions: ['Flam', 'Snake4', 'YellowsBat'],
+           onHit: ['burn', 0.5, 2], music: 'boss', title: 'Guardian of the Ember Dunes' },
+  tengu: { key: 'TenguRed', label: 'Karasu, the Tengu King', short: 'Karasu', biome: -1, fw: 82, frames: 6, t: 6, level: 12,
+           hp: 210, atk: 14, def: 5, mov: 4, range: [1, 3], fx: 'thunder', magic: true, fly: true, special: 'storm', minions: ['Spirit', 'Owl', 'Skull'],
+           onHit: ['stun', 0.2, 1], music: 'boss2', title: 'Lord of the Sky Gate' },
+};
+export const bossIdle = (b) => `Actor/Boss/${b.key}/Idle.png`;
+export const bossFace = (b) => `Actor/Boss/${b.key}/Faceset.png`;

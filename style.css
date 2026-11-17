@@ -223,3 +223,5 @@ h3 { font-size: 18px; }
 
 .btn.skill { color: #3a1450; }
 .btn.skill .icon { width: 20px; height: 20px; vertical-align: middle; image-rendering: pixelated; }
+
+.quest { color: #ffd27a; cursor: pointer; text-decoration: underline dotted; }

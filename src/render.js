@@ -1,6 +1,6 @@
 // Canvas rendering for the shared map (world + battle use the same terrain).
 import { img, ready } from './assets.js';
-import { TILE, spritePaths, FX } from './data.js';
+import { TILE, spritePaths, FX, BOSSES } from './data.js';
 import { SHEETS, GROUND, ROAD_SET, WATER_SET, TERR, OBJECTS, POI_ART, patchTile, sheet } from './tiles.js';
 
 export const canvas = document.getElementById('game');
@@ -94,6 +94,7 @@ export function objectDrawable(o, x, y) {
 
 export function poiArtDrawable(artKey, x, y, extra = null, faded = false) {
   const a = POI_ART[artKey];
+  if (a.invisible) return { z: (y + 1) * TILE, draw: () => { if (extra) extra(); } };
   const wx = (x - a.ax) * TILE, wy = (y - a.ay) * TILE;
   return { z: (y + 1) * TILE - 0.4, draw: () => { drawSheetRect(a.sheet, a.sx * TILE, a.sy * TILE, a.w * TILE, a.h * TILE, wx, wy, faded ? 0.55 : 1); if (extra) extra(); } };
 }
@@ -124,6 +125,21 @@ export function drawActor(sprite, wx, wy, dir = 0, frame = 0, opts = {}) {
     ctx.beginPath();
     ctx.ellipse(x + 8 * S, y + 14 * S, 7 * S, 3 * S, 0, 0, Math.PI * 2);
     ctx.fill();
+  }
+  if (sprite.kind === 'boss') {
+    const b = BOSSES[sprite.name], fh = im.height, fw = b.fw;
+    const f = Math.floor(performance.now() / 140) % b.frames;
+    const dx = x + (TILE / 2 - fw / 2) * S, dy = y + (TILE - fh + 2) * S + (opts.bob || 0) * S;
+    if (opts.ring) {
+      ctx.fillStyle = opts.ring;
+      ctx.beginPath(); ctx.ellipse(x + 8 * S, y + 14 * S, fw * 0.4 * S, 5 * S, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
+    if (opts.flash) ctx.filter = 'brightness(3)';
+    if (sprite.flip) { ctx.save(); ctx.translate(dx + fw * S, dy); ctx.scale(-1, 1); ctx.drawImage(im, f * fw, 0, fw, fh, 0, 0, fw * S, fh * S); ctx.restore(); }
+    else ctx.drawImage(im, f * fw, 0, fw, fh, dx, dy, fw * S, fh * S);
+    ctx.filter = 'none'; ctx.globalAlpha = 1;
+    return;
   }
   let row = frame % 4;
   if (sprite.kind !== 'monster' && opts.pose === 'attack') row = 4;

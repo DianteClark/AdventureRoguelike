@@ -1,6 +1,6 @@
 // UI screens: HUD, title, party, villages, events, loot, victory and death.
-import { G, saveRun, eraseRun, hasSave, loadRun, day, hero, MAX_PARTY, MAX_BAG, recordDeath, graves } from './state.js';
-import { BACKGROUNDS, HERO_BACKGROUNDS, HERO_SPRITE, CONSUMABLES, MONSTERS, charFace, SKILLS, STATUS } from './data.js';
+import { G, saveRun, eraseRun, hasSave, loadRun, day, hero, MAX_PARTY, MAX_BAG, recordDeath, graves, renown, addRenown, UNLOCKS, unlocked, runRenown } from './state.js';
+import { BACKGROUNDS, HERO_BACKGROUNDS, HERO_SPRITE, CONSUMABLES, MONSTERS, charFace, SKILLS, STATUS, BOSSES } from './data.js';
 import {
   makeHero, makeRecruit, randomLoot, randomWeapon, randomGear, makeConsumable, itemName, itemValue, stats, maxHp,
   randomName, gainXp, XP_TO_LEVEL,
@@ -30,7 +30,8 @@ export function renderHud() {
   const stats = h('div', { class: 'panel hud-stats' },
     h('span', { class: G.gold !== lastGold ? 'pop' : '' }, h('img', { src: url('Items/Object/MoneyBag.png'), class: 'icon' }), ` ${G.gold}`),
     h('span', {}, h('img', { src: url(`Ui/Skill Icon/Meteo/${isNight() ? 'Moon' : ({ rain: 'Rain', storm: 'Rain', snow: 'Snow', blizzard: 'Snow' }[weatherKind()] || 'Sun')}.png`), class: 'icon' }), ` Day ${day()}`),
-    h('span', { class: 'small dim hide-narrow' }, `${phaseLabel()} · ${WEATHER_NAME[weatherKind()]}`));
+    h('span', { class: 'small dim hide-narrow' }, `${phaseLabel()} · ${WEATHER_NAME[weatherKind()]}`),
+    G.scene === 'world' && G.world && G.world.pois.some((p) => p.type === 'boss') ? h('span', { class: 'small quest', onClick: () => showQuest() }, G.flags.guardians >= 3 ? (G.flags.victory ? '♛ Legend' : '✦ Sky Gate open') : `☠ Guardians ${G.flags.guardians || 0}/3`) : null);
   const party = h('div', { class: 'hud-party' },
     G.party.map((u) => h('div', { class: `hud-member ${u.alive ? '' : 'dead'} ${u.alive && u.hp / maxHp(u) < 0.3 ? 'danger' : ''}`, onClick: () => { if (G.scene === 'world') showParty(u); } },
       h('img', { src: faceUrl(spriteOf(u)), alt: u.name }), hpBar(u))));
@@ -48,7 +49,7 @@ export function renderHud() {
   }
 }
 
-export const spriteOf = (u) => (u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite });
+export const spriteOf = (u) => (u.kind === 'boss' ? { kind: 'boss', name: u.boss } : u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite });
 
 export function showMap() {
   const big = h('canvas', { class: 'bigmap' });
@@ -110,7 +111,8 @@ export function showTitle() {
     h('h1', {}, 'Ronin Roads'),
     h('div', { class: 'dim' }, 'A tactical roguelike. One life. Walk alone or gather a band.'),
     hasSave() ? button('Continue journey', () => { el.remove(); if (loadRun()) api.resumeRun(); else toast('Save could not be loaded'); }) : null,
-    button('New journey', () => { el.remove(); showHeroPick(); }),
+    button('New journey', () => { el.remove(); showHeroPick(); }, 'glow'),
+    renownPanel(),
     g.length ? h('div', { class: 'panel small', style: { maxWidth: '360px' } },
       h('div', {}, 'Fallen heroes'),
       g.slice(0, 4).map((d) => h('div', { class: 'dim' }, `${d.name} the ${d.bg} — day ${d.day}, ${d.kills} kills. ${d.cause}`))) : null,
@@ -118,8 +120,19 @@ export function showTitle() {
   root.appendChild(el);
 }
 
+function renownPanel() {
+  const r = renown();
+  const next = UNLOCKS.find((u) => r < u.at);
+  const got = UNLOCKS.filter((u) => r >= u.at);
+  if (!r) return null;
+  return h('div', { class: 'panel small', style: { maxWidth: '380px' } },
+    h('div', { style: { color: '#ffd27a' } }, `Renown ${r}`),
+    got.length ? h('div', { class: 'good' }, got.map((u) => u.name).join(' · ')) : null,
+    next ? h('div', { class: 'dim' }, `Next: ${next.name} at ${next.at} — ${next.desc}`) : h('div', { class: 'dim' }, 'All legacies unlocked.'));
+}
+
 function showHeroPick() {
-  const opts = rand.shuffle(HERO_BACKGROUNDS.slice()).slice(0, 3);
+  const opts = rand.shuffle(HERO_BACKGROUNDS.slice()).slice(0, unlocked('choice') ? 4 : 3);
   let sel = opts[0];
   let name = randomName();
   const wrap = h('div', { class: 'title-screen' });
@@ -132,6 +145,7 @@ function showHeroPick() {
         const bg = BACKGROUNDS[k];
         return h('div', { class: `panel ${sel === k ? 'sel' : ''}`, onClick: () => { sel = k; sfx('menu', 0.5); render(); } },
           h('div', { class: 'row' }, h('img', { class: 'face sm', src: url(charFace(HERO_SPRITE[k])) }), h('h3', {}, bg.label)),
+          h('div', { class: 'small', style: { color: '#e0b0ff', marginTop: '4px' } }, `✦ ${SKILLS[k].name}`),
           h('div', { class: 'small dim', style: { marginTop: '4px' } }, bg.desc),
           h('div', { class: 'small', style: { marginTop: '4px' } }, `HP ${bg.stats.hp + 6} · ATK ${bg.stats.atk + 1} · DEF ${bg.stats.def} · MOV ${bg.stats.mov}`));
       })),
@@ -341,6 +355,8 @@ export function interactPoi(poi) {
     poi.used = true;
     return;
   }
+  if (poi.type === 'boss') return bossPrompt(poi);
+  if (poi.type === 'skygate') return skyGatePrompt(poi);
   if (poi.type === 'den') {
     if (poi.cleared) { toast('An empty, ransacked lair.'); return; }
     const g = poi.group;
@@ -560,7 +576,7 @@ export function renderBattleBar(s) {
     return;
   }
   if (s.state === 'busy') return;
-  add(bar, h('div', { class: 'panel small' }, `Turn ${s.turn}`), button('End turn', s.onEndTurn), button('Retreat', s.onRetreat));
+  add(bar, h('div', { class: 'panel small' }, `Turn ${s.turn}`), button('End turn', s.onEndTurn), s.noRetreat ? null : button('Retreat', s.onRetreat));
 }
 
 function unitMini(b) {
@@ -623,6 +639,7 @@ export function showDeath({ cause, fallen }) {
     battles: G.stats.battles, cause, level: hr ? hr.level : 1, when: Date.now(),
   };
   recordDeath(summary);
+  const rw = awardRenown(false);
   eraseRun();
   const companions = G.stats.fallen.filter((f) => !hr || f.name !== hr.name);
   openModal(h('div', { class: 'col center' },
@@ -634,6 +651,133 @@ export function showDeath({ cause, fallen }) {
       h('span', {}, 'Days ', h('b', {}, summary.day)), h('span', {}, 'Battles ', h('b', {}, summary.battles)),
       h('span', {}, 'Kills ', h('b', {}, summary.kills)), h('span', {}, 'Gold ', h('b', {}, G.gold))),
     companions.length ? h('div', { class: 'small dim' }, `Fallen companions: ${companions.map((f) => f.name).join(', ')}`) : null,
+    rw ? h('div', { style: { color: '#ffd27a' } }, `+${rw.n} Renown (total ${renown()})`) : null,
+    rw && rw.fresh.length ? h('div', { class: 'good' }, rw.fresh.map((u) => `Unlocked: ${u.name} — ${u.desc}`).join('\n')) : null,
     G.party.filter((u) => !u.hero && u.alive).length ? h('div', { class: 'small dim' }, `Scattered to the winds: ${G.party.filter((u) => !u.hero && u.alive).map((u) => u.name).join(', ')}`) : null,
     button('Begin anew', () => { closeAllModals(); api.toTitle(); })), { dismissable: false });
+}
+
+
+// ------------------------------------------------------------------ Guardians, Sky Gate, ending
+export function showQuest() {
+  const bosses = G.world.pois.filter((p) => p.type === 'boss');
+  openModal(h('div', { class: 'col' },
+    h('div', { class: 'title' }, h('h2', { class: 'grow' }, 'The Road to Legend'), button('✕', () => closeAllModals(), 'small')),
+    h('div', { class: 'dialog-text small' }, 'Three Guardians hold the seals of the Sky Gate. Defeat them all, then climb the gate near where your journey began and face the Tengu King.'),
+    bosses.map((p) => {
+      const d = BOSSES[p.boss];
+      return h('div', { class: 'card panel inset' }, faceImg({ kind: 'boss', name: p.boss }, 'sm'),
+        h('div', { class: 'info' }, h('div', { style: { color: p.cleared ? '#8fe07a' : '#ffd27a' } }, `${p.cleared ? '✓ ' : ''}${d.label}`), h('div', { class: 'small dim' }, `${d.title} · Lv ${d.level}`)));
+    }),
+    h('div', { class: 'card panel inset' }, faceImg({ kind: 'boss', name: 'tengu' }, 'sm'),
+      h('div', { class: 'info' }, h('div', { style: { color: G.flags.victory ? '#8fe07a' : '#ff7a6b' } }, G.flags.victory ? '✓ Karasu, the Tengu King' : '??? — beyond the Sky Gate'), h('div', { class: 'small dim' }, 'The final trial')))));
+}
+
+function bossPrompt(poi) {
+  if (poi.cleared) { toast('Only silence remains here.'); return; }
+  const d = BOSSES[poi.boss];
+  const close = openModal(h('div', { class: 'col' },
+    h('div', { class: 'row', style: { alignItems: 'flex-start' } }, faceImg({ kind: 'boss', name: poi.boss }),
+      h('div', {}, h('h3', { style: { color: '#ff7a6b' } }, d.label), h('div', { class: 'small dim' }, `${d.title} · Lv ${d.level}`),
+        h('div', { class: 'dialog-text', style: { marginTop: '6px' } }, bossTaunt(poi.boss)))),
+    h('div', { class: 'small dim' }, 'Guardians telegraph their big attacks a turn early. Watch the red tiles. There is no retreat.'),
+    h('div', { class: 'row' },
+      button('Fight!', () => {
+        close();
+        api.transition(() => api.startBattle({
+          boss: poi.boss, members: [{ type: 'monster', key: d.minions[0], level: d.level - 3 }, { type: 'monster', key: d.minions[1], level: d.level - 3 }],
+          name: d.label, sub: d.title, anchor: { x: poi.x, y: poi.y + 2 }, tier: 5, elite: true, lootBonus: 2, noRetreat: true, music: d.music,
+          onWin: () => {
+            poi.cleared = true;
+            G.flags.guardians = (G.flags.guardians || 0) + 1;
+            G.gold += 150;
+            setTimeout(() => guardianFallen(), 900);
+          },
+        }));
+      }, 'glow'),
+      button('Not yet', () => close()))));
+}
+
+function bossTaunt(key) {
+  return {
+    oni: '"Another little ronin. I will use your bones to pick my teeth."',
+    frost: '"The cold takes everything in the end. Let me show you."',
+    ember: '"BURN. ALL THINGS BURN."',
+    tengu: '"Kaa... You broke my seals. Impressive, for a groundling. Now fall."',
+  }[key];
+}
+
+function guardianFallen() {
+  const n = G.flags.guardians || 0;
+  sfx('secret', 0.8);
+  if (n >= 3) {
+    const gate = G.world.pois.find((p) => p.type === 'skygate');
+    if (gate) {
+      gate.locked = false;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const x = gate.x + dx, y = gate.y + dy;
+        if (x >= 0 && y >= 0 && x < G.world.W && y < G.world.H) G.world.explored[y * G.world.W + x] = 1;
+      }
+    }
+    banner('THE SKY GATE OPENS', { color: '#ffd27a', sub: 'Return to where it all began', dur: 3, size: 0.75 });
+  } else {
+    banner(`GUARDIAN FALLEN ${n}/3`, { color: '#ffd27a', sub: `${3 - n} seal${3 - n > 1 ? 's' : ''} remain`, dur: 2.4, size: 0.75 });
+  }
+  renderHud(); saveRun();
+}
+
+function skyGatePrompt(poi) {
+  if (poi.locked) {
+    openModal(h('div', { class: 'col' }, h('h3', {}, 'The Sky Gate'),
+      h('div', { class: 'dialog-text' }, `An ancient gate that leads nowhere. Three seals glow on its pillars. ${G.flags.guardians || 0} of them have gone dark.\n\nDefeat the three Guardians to open it.`),
+      button('Leave', () => closeAllModals())));
+    return;
+  }
+  if (G.flags.victory) { toast('The gate is quiet now. You are a legend.'); return; }
+  const d = BOSSES.tengu;
+  const close = openModal(h('div', { class: 'col' },
+    h('div', { class: 'row', style: { alignItems: 'flex-start' } }, faceImg({ kind: 'boss', name: 'tengu' }),
+      h('div', {}, h('h3', { style: { color: '#ff7a6b' } }, d.label), h('div', { class: 'small dim' }, `${d.title} · Lv ${d.level}`),
+        h('div', { class: 'dialog-text', style: { marginTop: '6px' } }, bossTaunt('tengu')))),
+    h('div', { class: 'row' },
+      button('Ascend', () => {
+        close();
+        api.transition(() => api.startBattle({
+          boss: 'tengu', members: [{ type: 'monster', key: 'Spirit', level: 9 }, { type: 'monster', key: 'Owl', level: 9 }, { type: 'monster', key: 'Skull', level: 9 }],
+          name: d.label, sub: d.title, anchor: { x: poi.x, y: poi.y - 2 }, tier: 5, elite: true, lootBonus: 3, noRetreat: true, music: d.music,
+          onWin: () => { G.flags.victory = true; G.gold += 500; setTimeout(() => showEnding(), 1200); },
+        }), { dur: 0.6, color: '#ffffff' });
+      }, 'glow'),
+      button('Prepare first', () => close()))));
+}
+
+export function showEnding() {
+  const hr = hero();
+  playMusic('ending');
+  sfx('victory', 0.9);
+  banner('LEGEND', { color: '#ffd23d', sub: 'The Tengu King has fallen', dur: 3.5, size: 1.3 });
+  G.flags.legendDay = day();
+  saveRun();
+  const legacy = { name: hr.name, bg: BACKGROUNDS[hr.bg].label, day: day(), kills: G.stats.kills, battles: G.stats.battles, cause: '♛ Became a Legend', level: hr.level, when: Date.now(), legend: true };
+  setTimeout(() => {
+    openModal(h('div', { class: 'col center' },
+      h('h1', { style: { color: '#ffd23d' } }, 'A Legend Is Born'),
+      faceImg(spriteOf(hr)),
+      h('div', { class: 'dialog-text' }, `${hr.name} the ${legacy.bg} broke the three seals and cast down Karasu, the Tengu King, on day ${day()}.\n\nSongs will be sung of this road.`),
+      h('div', { class: 'row', style: { justifyContent: 'center', flexWrap: 'wrap' } }, G.party.map((u) => faceImg(spriteOf(u), 'sm'))),
+      h('div', { class: 'statline', style: { justifyContent: 'center' } },
+        h('span', {}, 'Days ', h('b', {}, day())), h('span', {}, 'Battles ', h('b', {}, G.stats.battles)), h('span', {}, 'Kills ', h('b', {}, G.stats.kills))),
+      button('Keep wandering', () => { closeAllModals(); api.resumeWorldMusic(); }),
+      button('Retire as a legend', () => { closeAllModals(); recordDeath(legacy); awardRenown(true); eraseRun(); api.toTitle(); })), { dismissable: false });
+  }, 2500);
+}
+
+export function awardRenown(legend = false) {
+  if (G.flags.renownAwarded) return 0;
+  G.flags.renownAwarded = true;
+  const before = renown();
+  const n = runRenown(legend);
+  addRenown(n);
+  const fresh = UNLOCKS.filter((u) => before < u.at && renown() >= u.at);
+  return { n, fresh };
 }
