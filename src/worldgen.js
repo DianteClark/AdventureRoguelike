@@ -167,7 +167,7 @@ export function generateWorld(seed) {
     }
   }
   // --- the Sky Gate near the start, sealed until the guardians fall
-  const gate = findSpot((x, y) => reachable(x, y) && distStart(x, y) >= 3 && distStart(x, y) <= 8, 3) || findSpot((x, y) => reachable(x, y), 3);
+  const gate = findSpot((x, y) => reachable(x, y) && distStart(x, y) >= 3 && distStart(x, y) <= 10, 6) || findSpot((x, y) => reachable(x, y) && distStart(x, y) <= 14, 4) || findSpot((x, y) => reachable(x, y), 3);
   if (gate) { clearArea(gate.x, gate.y, 1); pois.push({ id: 'skygate', type: 'skygate', x: gate.x, y: gate.y, art: 'torii', locked: true }); }
 
   // dens are guarded by strong groups; give them a tier

@@ -45,7 +45,7 @@ export function renderHud() {
   add(hud, stats, party, right);
   if (G.scene === 'world') {
     const bar = bottomBar();
-    add(bar, button('Party', () => showParty()), button(`Bag ${G.bag.length}/${MAX_BAG}`, () => showParty(null, 'bag')));
+    add(bar, button('Party', () => showParty()), button(`Bag ${G.bag.length}/${MAX_BAG}`, () => showParty(null, 'bag')), button('Camp', () => makeCamp()));
   }
 }
 
@@ -247,7 +247,12 @@ function eventCtx(extra = {}) {
     gold: (n) => { const v = Math.max(-G.gold, n); G.gold += v; if (v > 0) sfx('coin', 0.6); return v; },
     healAll: (f) => { for (const u of G.party) u.hp = Math.min(maxHp(u), u.hp + Math.ceil(maxHp(u) * f)); sfx('heal', 0.6); },
     hurtAll: (n) => { for (const u of G.party) u.hp = Math.max(1, u.hp - n); sfx('hit', 0.6); },
-    xpAll: (n) => { for (const u of G.party) { const l = gainXp(u, n); if (l) toast(`${u.name} reached level ${l.level}!`); } },
+    xpAll: (n) => { for (const u of G.party) { if (n < 0) { u.xp = Math.max(0, u.xp + n); continue; } const l = gainXp(u, n); if (l) toast(`${u.name} reached level ${l.level}!`); } },
+    revealBoss: () => {
+      const b = G.world.pois.find((p) => p.type === 'boss' && !p.cleared && !G.world.explored[p.y * G.world.W + p.x]) || G.world.pois.find((p) => p.type === 'boss' && !p.cleared);
+      if (!b) return;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const x = b.x + dx, y = b.y + dy; if (x >= 0 && y >= 0 && x < G.world.W && y < G.world.H) G.world.explored[y * G.world.W + x] = 1; }
+    },
     item: (t) => { const it = randomLoot(Math.max(1, Math.min(5, t))); addToBag(it); sfx('bonus', 0.6); return itemName(it); },
     partyFull: () => G.party.length >= MAX_PARTY,
     recruit: (t, free, bgKey) => {
@@ -325,6 +330,8 @@ function fightHere(o) {
   const tier = tierAt(G.player.x, G.player.y, G.world.start, b);
   let g = makeGroup(tier, b, rand);
   if (o.bandits) for (let i = 0; i < 10 && g.name !== 'Bandits'; i++) g = makeGroup(Math.max(2, tier), b, rand);
+  if (o.duel) g = { name: 'The Bridge Warden', members: [{ type: 'bandit', key: 'DemonGreen', level: Math.max(2, tier * 2) }] };
+  if (o.undead) g = { name: 'Restless Dead', members: Array.from({ length: 1 + tier }, (_, i) => ({ type: i % 2 ? 'bandit' : 'monster', key: i % 2 ? 'Skeleton' : (b === 2 ? 'SkullBlue' : 'Skull'), level: Math.max(1, tier * 2 - 1) })) };
   // spawn a few tiles away
   const dirs = rand.shuffle([[4, 0], [-4, 0], [0, 4], [0, -4], [3, 3], [-3, -3]]);
   let anchor = { x: G.player.x + 3, y: G.player.y };
@@ -780,4 +787,36 @@ export function awardRenown(legend = false) {
   addRenown(n);
   const fresh = UNLOCKS.filter((u) => before < u.at && renown() >= u.at);
   return { n, fresh };
+}
+
+
+// ------------------------------------------------------------------ Camping in the wild
+function makeCamp() {
+  const near = G.world.enemies.some((e) => e.alive !== false && Math.abs(e.x - G.player.x) + Math.abs(e.y - G.player.y) <= 6);
+  if (near) { toast('Enemies are too close to make camp!'); sfx('cancel', 0.5); return; }
+  const night = isNight();
+  const close = openModal(h('div', { class: 'col' },
+    h('div', { class: 'row', style: { alignItems: 'flex-start' } }, h('img', { src: url('Ui/Skill Icon/Job & Action/Cook.png'), style: { width: '48px', imageRendering: 'pixelated' } }),
+      h('div', {}, h('h3', {}, 'Make Camp'),
+        h('div', { class: 'dialog-text small' }, night
+          ? 'Build a fire and sleep until dawn. Everyone recovers half their health — but fires draw attention in the dark.'
+          : 'Rest in the shade for a few hours. Everyone recovers a quarter of their health.'))),
+    h('div', { class: 'row' },
+      button(night ? 'Sleep until dawn' : 'Rest a while', () => {
+        close();
+        api.transition(() => {
+          const DAYLEN = 40;
+          if (night) G.steps += DAYLEN - (G.steps % DAYLEN); else G.steps += 8;
+          for (const u of G.party) u.hp = Math.min(maxHp(u), u.hp + Math.ceil(maxHp(u) * (night ? 0.5 : 0.25)));
+          renderHud(); saveRun();
+          if (night && rand.chance(0.3)) {
+            setTimeout(() => { banner('AMBUSH!', { color: '#ff5a4a', sub: 'Something followed the smoke', dur: 1.4, size: 0.9 }); sfx('alert', 0.8); }, 400);
+            setTimeout(() => fightHere({ noRetreat: true }), 1500);
+          } else {
+            sfx('heal', 0.6);
+            setTimeout(() => banner(night ? 'MORNING' : 'RESTED', { color: '#ffd29a', sub: 'Your band feels better', dur: 1.5, size: 0.7 }), 300);
+          }
+        }, { dur: 0.5 });
+      }),
+      button('Not now', () => close()))));
 }

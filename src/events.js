@@ -85,7 +85,71 @@ export const TRAVEL_EVENTS = [
       { label: 'Ask for training instead', run: (c) => { c.xpAll(15); return 'He teaches breathing and patience. (+15 XP to all)'; } },
     ],
   },
+  {
+    id: 'kitsune', face: { kind: 'char', name: 'Princess' }, title: 'Fox Maiden',
+    text: 'A woman in white sits by the path, a fox tail peeking from beneath her robe. "Traveler. Trade me a memory, and I will give you a gift."',
+    choices: [
+      { label: 'Offer a memory (lose 25 XP from everyone)', run: (c) => { c.xpAll(-25); const it = c.item(Math.min(5, c.tier + 1)); return `She smiles and plucks the memory away like a petal. In its place: ${it}.`; } },
+      { label: 'Offer gold instead (40)', req: (c) => c.hasGold(40), run: (c) => { c.gold(-40); c.blessMaxHp(3); return '"Coins? How dull." Still, she breathes on each of you. (+3 max HP to all)'; } },
+      { label: 'Walk away quickly', run: () => 'When you look back, only a fox watches from the grass.' },
+    ],
+  },
+  {
+    id: 'bridge', face: { kind: 'char', name: 'GladiatorBlue' }, title: 'The Bridge Troll... Man',
+    text: 'A huge warrior blocks a narrow bridge. "None pass without besting me! Or paying 20 gold. Mostly the fighting."',
+    choices: [
+      { label: 'Duel him!', run: (c) => { c.fight({ duel: true, noRetreat: true }); return null; } },
+      { label: 'Pay the toll (20)', req: (c) => c.hasGold(20), run: (c) => { c.gold(-20); return '"Wise. Boring, but wise." He steps aside.'; } },
+      { label: 'Offer him a job', req: (c) => !c.partyFull() && c.hasGold(30), run: (c) => { c.gold(-30); const n = c.recruit(c.tier + 1, true, 'brawler'); return `"Steady pay? ...Fine!" ${n} joins your band.`; } },
+    ],
+  },
+  {
+    id: 'ruins', face: { kind: 'char', name: 'Skeleton' }, title: 'Collapsed Shrine',
+    text: 'Half-buried stone, an altar split in two. Something glints beneath the rubble — and something rattles in the dark.',
+    choices: [
+      { label: 'Dig for the treasure', run: (c) => {
+        if (c.rng.chance(0.5)) { c.fight({ undead: true }); return null; }
+        const it = c.item(c.tier + 1); return `You heave the stones aside and find ${it}.`;
+      } },
+      { label: 'Leave an offering (10)', req: (c) => c.hasGold(10), run: (c) => { c.gold(-10); c.healAll(0.5); return 'The rattling stops. A calm settles over your band.'; } },
+      { label: 'Move on', run: () => 'Some doors should stay shut.' },
+    ],
+  },
+  {
+    id: 'hotspring', face: { kind: 'char', name: 'Monkey' }, title: 'Hot Spring',
+    text: 'Steam rises from a hidden pool. A snow monkey eyes you, then scoots over to make room.',
+    choices: [
+      { label: 'Soak for a while', run: (c) => { c.healAll(1); c.wasteSteps(8); return 'Aches melt away. You emerge pink, rested, and a little late.'; } },
+      { label: 'Steal the monkey\'s snack', run: (c) => { c.hurtAll(1); c.gold(8); return 'It shrieks and bites. Inside the bundle: 8 gold, somehow.'; } },
+    ],
+  },
+  {
+    id: 'deserter', face: { kind: 'char', name: 'Knight' }, title: 'Deserter',
+    text: 'A soldier in torn colors raises empty hands. "I ran from the Shogun\'s army. They\'ll hang me if they find me. Take me with you?"',
+    choices: [
+      { label: 'Take them in', req: (c) => !c.partyFull(), run: (c) => { const n = c.recruit(c.tier, true, 'guard'); return `${n} salutes you with a shaking hand.`; } },
+      { label: 'Take their gear instead', run: (c) => { const it = c.item(c.tier); return `They hand over ${it} and flee into the woods.`; } },
+      { label: 'Turn them away', run: () => 'They nod, unsurprised, and limp away.' },
+    ],
+  },
+  {
+    id: 'oracle', face: { kind: 'char', name: 'OldWoman' }, title: 'Blind Oracle',
+    text: '"I see... three seals. Three guardians. And a bird-king laughing in the clouds." She holds out a palm. "A coin for the rest?"',
+    choices: [
+      { label: 'Pay 15 gold', req: (c) => c.hasGold(15), run: (c) => { c.gold(-15); c.revealBoss(); return '"There. Now you know where one of them waits." A distant place on your map sharpens.'; } },
+      { label: 'Decline', run: () => '"Then walk blind, like me."' },
+    ],
+  },
+  {
+    id: 'festival', face: { kind: 'char', name: 'Villager5' }, title: 'Lantern Festival',
+    text: 'Music and paper lanterns spill from a roadside camp. "Join us! Tonight nobody fights!"',
+    choices: [
+      { label: 'Celebrate', run: (c) => { c.healAll(0.4); c.xpAll(12); c.wasteSteps(6); return 'You dance, eat too much, and laugh for the first time in days. (+12 XP, healed)'; } },
+      { label: 'Win the archery contest', run: (c) => { if (c.rng.chance(0.5)) { c.gold(35); return 'Bullseye! The crowd roars. (+35 gold)'; } return 'Your arrow hits a lantern. Everyone pretends not to notice.'; } },
+    ],
+  },
 ];
+
 
 export const WANDERER_EVENTS = [
   {

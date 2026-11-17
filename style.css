@@ -225,3 +225,8 @@ h3 { font-size: 18px; }
 .btn.skill .icon { width: 20px; height: 20px; vertical-align: middle; image-rendering: pixelated; }
 
 .quest { color: #ffd27a; cursor: pointer; text-decoration: underline dotted; }
+/* HUD layout: stats + party wrap, menu & minimap pinned right */
+#hud { flex-wrap: wrap; padding-right: 116px; }
+.hud-stats { white-space: nowrap; flex-wrap: nowrap; flex: none; }
+.hud-right { position: absolute; right: 8px; top: calc(env(safe-area-inset-top) + 6px); }
+@media (max-width: 430px) { #hud { padding-right: 92px; } .hud-stats { gap: 6px; padding: 2px 6px; } }

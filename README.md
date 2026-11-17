@@ -14,6 +14,17 @@ Built with plain HTML, CSS and JavaScript (ES modules, no build step), using art
   python3 -m http.server 8000
   ```
 
+## What's new (v0.2 — the "juice" update)
+
+- **Feel**: screen shake, hit-stop on crits, sparks/blood/embers, recoiling and dodging units, pop-in damage numbers, VS splash + iris transitions into battle, sliding turn banners, level-up fanfare, falling sakura on the title.
+- **Atmosphere**: day/night cycle with real lighting (torchlight, lantern-lit villages, glowing shrines), weather per biome (rain, thunderstorms, sandstorms, heatwaves, snow, blizzards), biome title cards and music, minimap + full map.
+- **Class skills**: Iaido, Earthshaker, Pinning Shot, Bulwark, Shadowstep, Fireball, Sanctuary, Rally Cry.
+- **Status effects**: burn, poison, chill, root, stun + buffs. Monsters inflict them.
+- **Champions**: named elite packs with crowns and better loot.
+- **Guardians & the Sky Gate**: three giant biome bosses with telegraphed attacks, summons and enrage — beat them all to face the Tengu King and become a Legend.
+- **Renown**: earned every run, unlocks legacies (extra gold, better gear, a starting companion, more hero choices, more HP, a treasure map).
+- **More to do**: 15 road events, make camp in the wild (beware night ambushes), quest log.
+
 ## How it plays
 
 **Overworld**
