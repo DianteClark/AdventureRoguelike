@@ -66,7 +66,7 @@ img, .icon { image-rendering: pixelated; }
   border-image: url("assets/Ui/Theme/Theme Wood/button_normal.png") 3 fill / calc(var(--px) * 3) stretch;
   background: none; padding: 2px 10px 4px; min-height: 40px; min-width: 44px;
   cursor: pointer; text-shadow: 0 1px 0 rgba(255,220,170,.5);
-  white-space: nowrap;
+  white-space: nowrap; word-spacing: 0.35em; letter-spacing: 0.02em;
 }
 .btn:active, .btn.pressed {
   border-image-source: url("assets/Ui/Theme/Theme Wood/button_pressed.png");
@@ -154,7 +154,9 @@ h3 { font-size: 18px; }
 .choices .btn { text-align: left; white-space: normal; }
 
 /* ---------- Cards / lists ---------- */
-.card { display: flex; gap: 8px; align-items: center; padding: 6px; margin: 4px 0; }
+.card { display: flex; gap: 8px; align-items: center; padding: 6px; margin: 4px 0; flex-wrap: wrap; }
+.card > .col { flex-direction: row; margin-left: auto; }
+.card .info { min-width: 160px; }
 .card .info { flex: 1; min-width: 0; }
 .statline { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 13px; color: var(--ink-dim); }
 .statline b { color: var(--ink); font-weight: normal; }

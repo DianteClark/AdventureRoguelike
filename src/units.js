@@ -192,7 +192,7 @@ export function stats(u) {
   } else range = [1, 1];
   return {
     hpMax: u.base.hp + (b.hp || 0),
-    atk: u.base.atk + (b.power || 0) + (m ? 2 + m.t : 0), // monsters' natural weapons
+    atk: u.base.atk + (b.power || 0) + (m ? 1 + m.t : 0), // monsters' natural weapons
     def: u.base.def + (b.def || 0),
     mov: u.base.mov + (b.mov || 0),
     acc: (u.base.acc || 0) + (b.acc || 0),

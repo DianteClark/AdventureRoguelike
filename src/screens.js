@@ -322,7 +322,7 @@ export function interactPoi(poi) {
       h('div', { class: 'row', style: { alignItems: 'flex-start' } }, faceImg(lead),
         h('div', {}, h('h3', {}, `Lair: ${g.name}`),
           h('div', { class: 'dialog-text' }, `Bones and broken weapons litter the entrance. ${g.members.length} foes lurk inside, guarding a hoard.${poi.bounty ? `\n\nBounty: ${poi.bounty} gold.` : ''}`),
-          h('div', { class: 'small dim' }, `Threat: ${'☠'.repeat(poi.tier)}`))),
+          h('div', { class: 'small dim' }, `Threat ${poi.tier}/5`))),
       h('div', { class: 'row' },
         button('Attack the lair', () => {
           close();

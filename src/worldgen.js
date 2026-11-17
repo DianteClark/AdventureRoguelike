@@ -27,7 +27,7 @@ export function generateWorld(seed) {
     const bo = BIOME_OBJ[biome[i]];
     if (e > 0.7) {
       obj[i] = rng.chance(0.55) ? rng.pick(bo.rocks) : rng.pick(bo.stones);
-    } else if (m > 0.6 && rng.chance(0.78)) {
+    } else if (m > (biome[i] === BIOME.SAND ? 0.7 : 0.6) && rng.chance(biome[i] === BIOME.SAND ? 0.45 : 0.78)) {
       obj[i] = rng.pick(bo.trees);
     } else if (rng.chance(0.025)) {
       obj[i] = rng.pick(bo.trees);
@@ -191,7 +191,7 @@ export function tierAt(x, y, start, b) {
 export function makeGroup(tier, b, rng, elite = false) {
   const code = BIOME_CODE[b];
   const useBandits = tier >= 2 && rng.chance(0.28);
-  const size = Math.min(6, 2 + Math.floor(tier * 0.7) + rng.int(0, 1) + (elite ? 1 : 0));
+  const size = Math.min(6, 1 + Math.floor(tier * 0.8) + rng.int(0, 1) + (elite ? 1 : 0));
   const members = [];
   if (useBandits) {
     const pool = BANDITS.filter((d) => d.t <= tier && d.t >= tier - 2);
