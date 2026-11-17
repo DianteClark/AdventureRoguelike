@@ -2,7 +2,7 @@
 import { RNG, fbm } from './rng.js';
 import { BIOME, TERR, OBJECTS, BIOME_OBJ, BIOME_CODE } from './tiles.js';
 import { astar, DIRS } from './grid.js';
-import { MONSTERS, BANDITS } from './data.js';
+import { MONSTERS, BANDITS, CHAMPION_TITLES } from './data.js';
 
 export const WORLD_W = 72, WORLD_H = 72;
 
@@ -166,7 +166,15 @@ export function generateWorld(seed) {
     if (!s) continue;
     const b = biome[idx(s.x, s.y)];
     const tier = tierAt(s.x, s.y, start, b);
-    enemies.push({ id: `e${eid++}`, x: s.x, y: s.y, hx: s.x, hy: s.y, tier, ...makeGroup(tier, b, rng), chase: 0 });
+    const g = makeGroup(tier, b, rng);
+    const e = { id: `e${eid++}`, x: s.x, y: s.y, hx: s.x, hy: s.y, tier, ...g, chase: 0 };
+    if (tier >= 2 && rng.chance(0.14)) {
+      const lead = g.members[0];
+      const label = lead.type === 'bandit' ? BANDITS.find((d) => d.sprite === lead.key).label : MONSTERS[lead.key].label;
+      e.champion = `${rng.pick(CHAMPION_TITLES)} ${label}`;
+      e.name = `${e.champion}'s band`;
+    }
+    enemies.push(e);
   }
   // den guards (static)
   for (const p of pois.filter((p) => p.type === 'den')) {

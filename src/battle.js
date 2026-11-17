@@ -1,10 +1,10 @@
 // Tactical grid battles fought on the overworld terrain where the encounter happened.
 import { G, hero, saveRun } from './state.js';
-import { TILE, MONSTERS, BANDITS, FAMILY_FX } from './data.js';
+import { TILE, MONSTERS, BANDITS, FAMILY_FX, STATUS, SKILLS, monsterOnHit } from './data.js';
 import { OBJECTS, TERR } from './tiles.js';
 import { DIRS, reachable, pathFromReach, manhattan } from './grid.js';
 import {
-  view, ctx, drawGround, drawActor, drawHpBar, fillTile, strokeTile, drawFx, drawText, toWorldTile,
+  view, ctx, drawGround, drawActor, drawHpBar, fillTile, strokeTile, drawFx, drawText, toWorldTile, drawIcon,
 } from './render.js';
 import { drawWorldObjects, tileBlocked } from './world.js';
 import { stats, maxHp, makeMonster, makeBandit, gainXp } from './units.js';
@@ -74,6 +74,16 @@ export function startBattle(opts) {
     const t = take(et); if (!t) break;
     units.push(wrap(f, 'enemy', t));
   }
+  if (opts.champion) {
+    const c = units.find((b) => b.team === 'enemy');
+    if (c) {
+      c.champion = true;
+      c.u.name = opts.champion;
+      c.u.level += 2;
+      c.u.base.hp = Math.round(c.u.base.hp * 1.7); c.u.base.atk += 2; c.u.base.def += 1;
+      c.u.hp = maxHp(c.u);
+    }
+  }
 
   B = {
     rect, units, phase: 'player', turn: 1, state: 'idle', sel: null, reach: null, targets: [], heals: [],
@@ -98,7 +108,7 @@ export function startBattle(opts) {
 function wrap(u, team, t) {
   return {
     u, team, x: t.x, y: t.y, rx: t.x * TILE, ry: t.y * TILE, dir: team === 'player' ? 1 : 0,
-    moved: false, acted: false, lastStandUsed: false, flash: 0, pose: null, lunge: null, dead: false,
+    moved: false, acted: false, lastStandUsed: false, flash: 0, pose: null, lunge: null, dead: false, st: {}, cd: 0,
     sprite: u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite },
   };
 }
@@ -113,6 +123,32 @@ export function fitCamera() {
   view.camX = B.rect.x * TILE - (view.w - pw) / 2 / view.S;
   view.camY = B.rect.y * TILE - (top + (availH - ph) / 2) / view.S;
 }
+
+// ------------------------------------------------------------------ Battle-modified stats & statuses
+function bstats(b) {
+  const s = stats(b.u);
+  const st = b.st || {};
+  if (st.atkUp) s.atk += st.atkUp.val;
+  if (st.defUp) s.def += st.defUp.val;
+  if (st.chill) s.mov = Math.max(1, s.mov - 2);
+  if (st.root) s.mov = 0;
+  return s;
+}
+function applyStatus(b, key, turns, val = 0) {
+  if (!b || b.dead) return;
+  b.st = b.st || {};
+  const cur = b.st[key];
+  b.st[key] = { turns: Math.max(cur ? cur.turns : 0, turns), val: Math.max(cur ? cur.val : 0, val) };
+  const def = STATUS[key];
+  floatText(b, def.label, def.color, 6, -6);
+  sfx(key === 'burn' ? 'burn' : key === 'stun' ? 'impact' : def.buff ? 'powerup' : 'strange', 0.45);
+}
+function decStatuses(team) {
+  for (const b of alive(team)) {
+    for (const k of Object.keys(b.st || {})) { b.st[k].turns--; if (b.st[k].turns <= 0) delete b.st[k]; }
+  }
+}
+const skillOf = (b) => (b && b.u && b.u.bg && !b.u.monster ? SKILLS[b.u.bg] : null);
 
 // ------------------------------------------------------------------ Queries
 const alive = (team) => B.units.filter((b) => !b.dead && (!team || b.team === team));
@@ -132,7 +168,7 @@ function coverAt(x, y) {
 }
 
 function moveReach(b) {
-  const s = stats(b.u);
+  const s = bstats(b);
   return reachable(b.x, b.y, s.mov, (x, y) => {
     if (!terrainOk(x, y, s.fly)) return false;
     const o = unitAt(x, y);
@@ -146,8 +182,8 @@ function inRange(from, to, range) {
 }
 
 // ------------------------------------------------------------------ Combat math
-export function forecast(att, def) {
-  const a = stats(att.u), d = stats(def.u);
+export function forecast(att, def, opt = {}) {
+  const a = bstats(att), d = bstats(def);
   const one = (A, D, aw, dw) => {
     const hit = Math.max(5, Math.min(100, 85 + A.acc - D.dodge - coverAt(dw.x, dw.y)));
     const effDef = A.magic ? Math.floor(D.def / 2) : Math.max(0, D.def - A.sunder);
@@ -158,13 +194,14 @@ export function forecast(att, def) {
     return { hit, dmg, crit: Math.max(0, Math.min(60, A.crit)), strikes };
   };
   const res = one(a, d, att, def);
-  const canCounter = !def.dead && inRange(def, att, d.range) && !(d.heals && false);
+  if (opt.mult) res.dmg = Math.max(1, Math.round(res.dmg * opt.mult));
+  const canCounter = !opt.noCounter && !def.dead && !(def.st && def.st.stun) && inRange(def, att, d.range);
   res.counter = canCounter ? one(d, a, def, att) : null;
   return res;
 }
 
 function dealDamage(target, dmg, source) {
-  const s = stats(target.u);
+  const s = bstats(target);
   if (target.u.hp - dmg <= 0 && s.lastStand && !target.lastStandUsed) {
     target.lastStandUsed = true;
     target.u.hp = 1;
@@ -176,9 +213,9 @@ function dealDamage(target, dmg, source) {
 }
 
 async function strike(att, def, info, isCounter = false) {
-  const a = stats(att.u);
+  const a = bstats(att);
   const fam = a.family;
-  let fxKind = att.u.monster ? MONSTERS[att.u.monster].fx : (FAMILY_FX[fam] || 'slash');
+  let fxKind = info.fxKind || (att.u.monster ? MONSTERS[att.u.monster].fx : (FAMILY_FX[fam] || 'slash'));
   face(att, def);
   att.pose = 'attack';
   const ranged = manhattan(att, def) > 1;
@@ -208,9 +245,14 @@ async function strike(att, def, info, isCounter = false) {
       if (def.u.kind === 'monster') burst(cx, cy, { n: 6, colors: [monsterBlood(def.u.monster)], speed: 60, life: 0.45, g: 240, size: 1.5 });
       else blood(cx, cy);
       floatText(def, crit ? `${dmg}!` : `${dmg}`, crit ? '#ffd27a' : '#ffffff', crit ? 12 : 9);
+      if (!killed) {
+        const oh = att.u.monster ? monsterOnHit(att.u.monster) : null;
+        if (oh && rand.next() < oh[1]) applyStatus(def, oh[0], oh[2]);
+        if (info.status) applyStatus(def, info.status[0], info.status[1], info.status[2] || 0);
+      }
       addXp(att, 6);
       if (a.lifesteal > 0) heal(att, Math.max(1, Math.round(dmg * a.lifesteal)), false);
-      const ds = stats(def.u);
+      const ds = bstats(def);
       if (ds.thorns && !ranged && !att.dead) {
         await wait(120);
         const k2 = dealDamage(att, ds.thorns, def);
@@ -248,7 +290,7 @@ async function kill(victim, killer) {
   if (victim.u.hero) { flash('#ff2a2a', 0.45, 0.6); hitstop(300); }
   sfx('explosion', 0.35);
   if (killer && !killer.dead) {
-    const ks = stats(killer.u);
+    const ks = bstats(killer);
     if (killer.team === 'player') { addXp(killer, 18 + victim.u.level * 7); killer.u.kills = (killer.u.kills || 0) + 1; G.stats.kills++; }
     if (ks.healOnKill) heal(killer, ks.healOnKill, false);
   }
@@ -301,7 +343,7 @@ async function attack(att, def) {
 
 async function doHeal(healer, target) {
   B.busy = true;
-  const s = stats(healer.u);
+  const s = bstats(healer);
   face(healer, target);
   healer.pose = 'attack';
   sfx('heal', 0.7);
@@ -343,6 +385,8 @@ export function battleTap(sx, sy) {
   if (!inRect(tx, ty)) { deselect(); return; }
   const who = unitAt(tx, ty);
 
+  if (B.state === 'skill') { skillTap(tx, ty); return; }
+
   if (B.state === 'forecast') { // tapping the same target confirms
     if (who && who === B.fTarget) { confirmAction(); return; }
     B.state = B.sel && B.sel.moved ? 'action' : 'selected';
@@ -356,7 +400,7 @@ export function battleTap(sx, sy) {
   }
 
   if (B.state === 'selected') {
-    const s = stats(B.sel.u);
+    const s = bstats(B.sel);
     if (who === B.sel) { deselect(); return; }
     // enemy: attack from here or auto-step into range
     if (who && who.team === 'enemy') {
@@ -379,7 +423,7 @@ export function battleTap(sx, sy) {
 }
 
 function bestSpotToHit(b, target) {
-  const s = stats(b.u);
+  const s = bstats(b);
   let best = null, bd = Infinity;
   for (const n of B.reach.values()) {
     if (n.noStop || (unitAt(n.x, n.y) && unitAt(n.x, n.y) !== b)) continue;
@@ -412,7 +456,7 @@ function inspect(b) {
 }
 
 function computeTargets() {
-  const b = B.sel, s = stats(b.u);
+  const b = B.sel, s = bstats(b);
   B.targets = alive('enemy').filter((e) => inRange(b, e, s.range));
   B.heals = s.heals ? alive('player').filter((p) => p !== b && inRange(b, p, s.range) && p.u.hp < maxHp(p.u)) : [];
 }
@@ -464,24 +508,29 @@ function undoMove() {
 // ------------------------------------------------------------------ Turns
 async function endPlayerTurn() {
   if (!B || B.phase !== 'player') return;
+  decStatuses('player');
   B.phase = 'enemy'; B.state = 'idle'; B.sel = null; B.reach = null; B.inspect = null;
   renderBattleUi();
   banner('ENEMY TURN', { color: '#ff7a6b', dur: 0.9 });
   sfx('alert', 0.4);
   await wait(800);
   await turnStartEffects('enemy');
+  if (checkEnd()) return;
   for (const e of alive('enemy')) {
     if (!B || B.over) return;
     if (e.dead) continue;
+    if (e.st && e.st.stun) { floatText(e, 'Stunned', '#ffe27a', 6); await wait(350); continue; }
     await enemyAct(e);
     if (checkEnd()) return;
   }
   if (!B || B.over) return;
+  decStatuses('enemy');
   B.turn++;
   B.phase = 'player';
   for (const b of B.units) { b.acted = false; b.moved = false; }
   await turnStartEffects('player');
   if (checkEnd()) return;
+  if (alive('player').every((p) => p.acted)) { setTimeout(() => endPlayerTurn(), 600); return; }
   banner('YOUR TURN', { color: '#7fd0ff', dur: 0.9 });
   sfx('menu', 0.6);
   renderBattleUi();
@@ -489,14 +538,27 @@ async function endPlayerTurn() {
 
 async function turnStartEffects(team) {
   for (const b of alive(team)) {
-    const s = stats(b.u);
+    if (b.cd > 0) b.cd--;
+    const s = bstats(b);
     if (s.regen) heal(b, s.regen);
+    for (const [k, dmg] of [['burn', 3], ['poison', 2]]) {
+      if (b.dead || !b.st[k]) continue;
+      const killed = dealDamage(b, dmg, null);
+      b.flash = 0.2;
+      floatText(b, `${dmg}`, STATUS[k].color, 8);
+      burst(b.x * TILE + 8, b.y * TILE + 8, { n: 8, colors: [STATUS[k].color, '#fff'], speed: 40, life: 0.5, g: -40, size: 1.4 });
+      sfx(k === 'burn' ? 'burn' : 'hit2', 0.4);
+      await wait(220);
+      if (killed) await kill(b, null);
+    }
+    if (!b.dead && b.st.stun && team === 'player') { b.acted = true; floatText(b, 'Stunned', '#ffe27a', 6); }
   }
   await wait(50);
 }
 
 async function enemyAct(e) {
-  const s = stats(e.u);
+  if (await enemyTrySkill(e)) return;
+  const s = bstats(e);
   const reach = moveReach(e);
   const players = alive('player');
   let best = null;
@@ -518,6 +580,7 @@ async function enemyAct(e) {
     const path = pathFromReach(reach, best.n.x, best.n.y);
     if (path.length > 1) await animateMove(e, path);
     await wait(120);
+    if (await enemyTrySkill(e)) return;
     B.busy = true;
     const info = forecast(e, best.p);
     await strike(e, best.p, info);
@@ -590,7 +653,7 @@ async function retreat() {
 
 function victory() {
   const enemies = B.units.filter((b) => b.team === 'enemy');
-  const goldBonus = Math.max(0, ...alive('player').map((b) => stats(b.u).gold));
+  const goldBonus = Math.max(0, ...alive('player').map((b) => bstats(b).gold));
   const gold = Math.round(enemies.reduce((s, e) => s + 4 + e.u.level * 3 + (e.u.isBandit ? 6 : 0), 0) * (1 + goldBonus) * rand.float(0.85, 1.2));
   // xp
   const results = [];
@@ -631,14 +694,17 @@ export function renderBattleUi() {
   screens.renderBattleBar({
     phase: B.phase, state: B.state, sel: B.sel, inspect: B.inspect, fTarget: B.fTarget, fHeal: B.fHeal,
     forecast: B.fTarget && !B.fHeal && B.sel ? forecast(B.sel, B.fTarget) : null,
-    healAmount: B.fHeal && B.sel ? Math.max(4, Math.round(stats(B.sel.u).atk * 1.1)) : 0,
+    healAmount: B.fHeal && B.sel ? Math.max(4, Math.round(bstats(B.sel).atk * 1.1)) : 0,
     canUndo: B.state === 'action' && B.sel && B.origin && (B.sel.x !== B.origin.x || B.sel.y !== B.origin.y),
     turn: B.turn,
+    skill: B.sel && B.sel.team === 'player' ? skillOf(B.sel) : null,
+    skillCd: B.sel ? B.sel.cd : 0,
+    onSkill: () => beginSkill(),
     onEndTurn: () => { if (!B.busy) { for (const b of alive('player')) b.acted = true; B.sel = null; endPlayerTurn(); } },
     onWait: () => { if (B.sel && !B.busy) finishUnit(B.sel); },
     onUndo: () => undoMove(),
     onConfirm: () => confirmAction(),
-    onCancel: () => { B.state = B.sel && B.sel.moved ? 'action' : 'selected'; B.fTarget = null; renderBattleUi(); },
+    onCancel: () => { B.state = B.sel && B.sel.moved ? 'action' : 'selected'; B.fTarget = null; B.skillTiles = null; B.skillHover = null; renderBattleUi(); },
     onRetreat: () => retreat(),
     onDeselect: () => deselect(),
   });
@@ -677,7 +743,7 @@ export function battleRender() {
   for (let y = 0; y <= r.h; y++) { ctx.beginPath(); ctx.moveTo(ax, ay + y * TILE * view.S); ctx.lineTo(ax + aw, ay + y * TILE * view.S); ctx.stroke(); }
 
   if (B.inspect && B.inspectReach && !B.inspect.dead) {
-    const s = stats(B.inspect.u);
+    const s = bstats(B.inspect);
     const danger = new Set();
     for (const n of B.inspectReach.values()) {
       if (n.noStop) continue;
@@ -690,7 +756,7 @@ export function battleRender() {
     for (const k of danger) { const x = k % 1000, y = Math.floor(k / 1000); if (inRect(x, y)) strokeTile(x, y, 'rgba(255,90,80,0.45)', 1); }
   }
   if (B.sel && (B.state === 'selected') && B.reach) {
-    const s = stats(B.sel.u);
+    const s = bstats(B.sel);
     const atk = new Set();
     for (const n of B.reach.values()) {
       if (n.noStop) continue;
@@ -706,6 +772,10 @@ export function battleRender() {
   if (B.sel && (B.state === 'action' || B.state === 'forecast')) {
     for (const t of B.targets) fillTile(t.x, t.y, 'rgba(255,70,60,0.45)');
     for (const t of B.heals) fillTile(t.x, t.y, 'rgba(110,230,120,0.45)');
+  }
+  if (B.state === 'skill' && B.skillTiles) {
+    for (const t of B.skillTiles) { fillTile(t.x, t.y, `rgba(190,100,255,${0.42 + Math.sin(time * 6) * 0.1})`); strokeTile(t.x, t.y, 'rgba(230,190,255,0.7)', 0.6); }
+    if (B.skillHover) for (const t of B.skillHover) strokeTile(t.x, t.y, '#ffd27a', 1);
   }
   if (B.sel) strokeTile(B.sel.x, B.sel.y, `rgba(255,220,100,${0.6 + Math.sin(time * 6) * 0.3})`, 1.2);
   if (B.fTarget) strokeTile(B.fTarget.x, B.fTarget.y, '#ffffff', 1.2);
@@ -723,12 +793,17 @@ export function battleRender() {
       oy += breathe;
       const frame = b.sprite.kind === 'monster' ? Math.floor(time * 4 + b.x) % 4 : (b.walk ? Math.floor(b.walk / 6) % 4 : 0);
       drawActor(b.sprite, b.rx + ox, b.ry + oy, b.dir, frame, {
-        ring: b.team === 'player' ? 'rgba(80,170,255,.45)' : 'rgba(255,70,60,.45)',
-        alpha: b.dead ? Math.max(0, b.fade) : (b.acted && B.phase === 'player' && b.team === 'player' ? 0.55 : 1),
+        ring: b.team === 'player' ? 'rgba(80,170,255,.45)' : b.champion ? `rgba(255,200,60,${0.5 + Math.sin(time * 5) * 0.2})` : 'rgba(255,70,60,.45)',
+        alpha: b.alpha === 0 ? 0 : b.dead ? Math.max(0, b.fade) : (b.acted && B.phase === 'player' && b.team === 'player' ? 0.55 : 1),
         pose: b.pose, flash: b.flash > 0,
       });
       if (!b.dead) drawHpBar(b.rx, b.ry, b.u.hp / maxHp(b.u), b.team === 'player' ? '#5fd0ff' : '#e0493f');
       if (b.u.hero && !b.dead) drawText('★', b.rx + 14, b.ry - 1, '#ffd27a', 6);
+      if (b.champion && !b.dead) drawText('♛', b.rx + 8, b.ry - 5, '#ffd23d', 7);
+      if (!b.dead) {
+        let i = 0;
+        for (const k of Object.keys(b.st || {})) { drawIcon(STATUS[k].icon, b.rx - 2 + i * 6, b.ry + 9, 6); i++; }
+      }
       if (!b.dead && b.team === 'player' && B.phase === 'player' && !b.acted && B.sel !== b && !B.busy) {
         const bob = Math.sin(time * 5 + b.x) * 1.2;
         drawChevron(b.rx + 8, b.ry - 7 + bob, 'rgba(127,208,255,0.9)');
@@ -784,3 +859,206 @@ function drawChevron(wx, wy, color, scale = 1) {
 }
 
 export const battleActive = () => !!B;
+
+
+// ------------------------------------------------------------------ Skills
+const plus = (x, y) => [{ x, y }, { x: x + 1, y }, { x: x - 1, y }, { x, y: y + 1 }, { x, y: y - 1 }];
+function freeAdjacent(t, from) {
+  const opts = [];
+  for (const [dx, dy] of DIRS) {
+    const x = t.x + dx, y = t.y + dy;
+    if (!terrainOk(x, y, false) || unitAt(x, y)) continue;
+    opts.push({ x, y, d: from ? -manhattan({ x, y }, from) : 0 });
+  }
+  opts.sort((a, b) => a.d - b.d); // prefer the far side (behind the target)
+  return opts[0] || null;
+}
+
+function skillTargets(b, sk) {
+  if (sk.target === 'enemy') {
+    return alive('enemy').filter((e) => inRange(b, e, sk.range) && (sk.id !== 'shadowstep' || freeAdjacent(e, b))).map((e) => ({ x: e.x, y: e.y }));
+  }
+  if (sk.target === 'tile') {
+    const out = [];
+    for (let y = B.rect.y; y < B.rect.y + B.rect.h; y++) for (let x = B.rect.x; x < B.rect.x + B.rect.w; x++) if (inRange(b, { x, y }, sk.range)) out.push({ x, y });
+    return out;
+  }
+  return [];
+}
+
+function beginSkill() {
+  const b = B.sel, sk = skillOf(b);
+  if (!b || !sk || b.cd > 0 || B.busy) return;
+  if (sk.target === 'self') { executeSkill(b, sk, null); return; }
+  const tiles = skillTargets(b, sk);
+  if (!tiles.length) { toast('No targets in range'); return; }
+  B.prevState = B.state;
+  B.state = 'skill';
+  B.skillTiles = tiles;
+  B.skillHover = null;
+  renderBattleUi();
+}
+
+function skillTap(tx, ty) {
+  const b = B.sel, sk = skillOf(b);
+  const ok = B.skillTiles && B.skillTiles.some((t) => t.x === tx && t.y === ty);
+  if (!ok) { B.state = B.prevState || 'selected'; B.skillTiles = null; renderBattleUi(); return; }
+  if (sk.id === 'fireball') {
+    const area = plus(tx, ty);
+    if (!B.skillHover || B.skillHover[0].x !== tx || B.skillHover[0].y !== ty) { B.skillHover = area; return; } // first tap previews
+  }
+  executeSkill(b, sk, { x: tx, y: ty });
+}
+
+async function executeSkill(b, sk, target) {
+  B.state = 'busy'; B.busy = true; B.skillTiles = null; B.skillHover = null;
+  renderBattleUi();
+  banner(sk.name, { color: '#e0b0ff', dur: 0.8, size: 0.55 });
+  sfx('powerup', 0.6);
+  b.cd = sk.cd + 1; // ticks down at the start of our next turn
+  b.pose = 'attack';
+  await wait(300);
+  const t = target ? unitAt(target.x, target.y) : null;
+  const s = bstats(b);
+  switch (sk.id) {
+    case 'iaido': {
+      flash('#ffffff', 0.25, 0.12);
+      const info = forecast(b, t, { mult: 1.7, noCounter: true }); info.fxKind = 'heavy'; info.crit = Math.min(80, info.crit + 15);
+      await strike(b, t, info, true);
+      break;
+    }
+    case 'pin': {
+      const info = forecast(b, t, { noCounter: true }); info.fxKind = 'cut'; info.status = ['root', 1];
+      await strike(b, t, info, true);
+      break;
+    }
+    case 'quake': {
+      sfx('slam', 0.8); shake(7, 0.5); hitstop(80);
+      B.fx.push({ kind: 'quake', x: b.x, y: b.y - 0.5, t: 0, dur: 0.7 });
+      for (const [dx, dy] of DIRS) dustRing(b.x + dx, b.y + dy);
+      await wait(250);
+      for (const [dx, dy] of DIRS) {
+        const e = unitAt(b.x + dx, b.y + dy);
+        if (!e || e.team === b.team) continue;
+        const f = forecast(b, e, { noCounter: true });
+        const dmg = Math.max(1, Math.round(f.dmg * rand.float(0.9, 1.1)));
+        const killed = dealDamage(e, dmg, b);
+        e.flash = 0.3; e.knock = { t: 0, dx, dy };
+        floatText(e, `${dmg}`, '#ffffff', 9);
+        sparks(e.x * TILE + 8, e.y * TILE + 8, '#ffb45a', 12);
+        addXp(b, 6);
+        if (killed) await kill(e, b);
+        else if (rand.chance(0.5)) applyStatus(e, 'stun', 1);
+      }
+      break;
+    }
+    case 'bulwark': {
+      applyStatus(b, 'defUp', 2, 4);
+      B.fx.push({ kind: 'shield', x: b.x, y: b.y, t: 0, dur: 0.6 });
+      for (const [dx, dy] of DIRS) {
+        const a = unitAt(b.x + dx, b.y + dy);
+        if (a && a.team === b.team) { applyStatus(a, 'defUp', 2, 2); B.fx.push({ kind: 'shield', x: a.x, y: a.y, t: 0, dur: 0.6 }); }
+      }
+      await wait(500);
+      break;
+    }
+    case 'shadowstep': {
+      const spot = freeAdjacent(t, b);
+      if (spot) {
+        smokePuff(b.x * TILE + 8, b.y * TILE + 8, '#5a4a6a', 14);
+        sfx('fx', 0.6);
+        b.alpha = 0;
+        await wait(180);
+        b.x = spot.x; b.y = spot.y; b.rx = b.x * TILE; b.ry = b.y * TILE;
+        smokePuff(b.x * TILE + 8, b.y * TILE + 8, '#5a4a6a', 14);
+        b.alpha = 1;
+        await wait(120);
+        const info = forecast(b, t, { noCounter: true }); info.crit = Math.min(80, info.crit + 20);
+        await strike(b, t, info, true);
+      }
+      break;
+    }
+    case 'fireball': {
+      const area = plus(target.x, target.y).filter((p) => inRect(p.x, p.y));
+      sfx('fire', 0.8);
+      B.fx.push({ kind: 'boom', x: target.x, y: target.y, t: 0, dur: 0.6 });
+      for (const p of area.slice(1)) B.fx.push({ kind: 'fire', x: p.x, y: p.y, t: 0, dur: 0.5 });
+      shake(6, 0.4); flash('#ff9b3b', 0.25, 0.2);
+      burst(target.x * TILE + 8, target.y * TILE + 8, { n: 30, colors: ['#ff9b3b', '#ffd27a', '#ff5a3a'], speed: 120, life: 0.6, g: 60, size: 1.8, glow: true });
+      await wait(250);
+      for (const p of area) {
+        const e = unitAt(p.x, p.y);
+        if (!e || e.team === b.team) continue;
+        const es = bstats(e);
+        const dmg = Math.max(1, Math.round((s.atk - Math.floor(es.def / 2)) * 0.9 * rand.float(0.9, 1.1)));
+        const killed = dealDamage(e, dmg, b);
+        e.flash = 0.3;
+        floatText(e, `${dmg}`, '#ffb45a', 9);
+        addXp(b, 6);
+        if (killed) await kill(e, b);
+        else if (rand.chance(0.6)) applyStatus(e, 'burn', 2);
+      }
+      break;
+    }
+    case 'sanctuary': {
+      sfx('heal', 0.8);
+      const amount = Math.max(5, Math.round(s.atk * 0.8));
+      for (const a of alive(b.team)) {
+        if (manhattan(a, b) > 2) continue;
+        B.fx.push({ kind: 'heal', x: a.x, y: a.y, t: 0, dur: 0.6 });
+        for (const k of ['burn', 'poison', 'chill', 'root', 'stun']) if (a.st[k]) delete a.st[k];
+        heal(a, amount);
+        addXp(b, 4);
+      }
+      await wait(500);
+      break;
+    }
+    case 'rally': {
+      sfx('levelup', 0.6);
+      for (const a of alive(b.team)) {
+        if (manhattan(a, b) > 3) continue;
+        applyStatus(a, 'atkUp', 2, 3);
+        B.fx.push({ kind: 'boost', x: a.x, y: a.y - 0.3, t: 0, dur: 0.7 });
+        a.cheer = 0.6;
+      }
+      await wait(500);
+      break;
+    }
+  }
+  b.pose = null;
+  B.busy = false;
+  if (checkEnd()) return;
+  if (b.team === 'player') finishUnit(b);
+}
+
+function dustRing(x, y) {
+  if (!inRect(x, y)) return;
+  smokePuff(x * TILE + 8, y * TILE + 12, '#bba58a', 6);
+}
+
+// enemy humans use their skills when it makes sense; returns true if a skill was used
+async function enemyTrySkill(e) {
+  const sk = skillOf(e);
+  if (!sk || e.cd > 0) return false;
+  const players = alive('player');
+  if (sk.id === 'quake') {
+    const n = DIRS.filter(([dx, dy]) => { const p = unitAt(e.x + dx, e.y + dy); return p && p.team === 'player'; }).length;
+    if (n >= 2) { await executeSkill(e, sk, null); return true; }
+  }
+  if (sk.id === 'fireball') {
+    let best = null, bn = 1;
+    for (const p of players) for (const c of plus(p.x, p.y)) {
+      if (!inRange(e, c, sk.range)) continue;
+      const n = plus(c.x, c.y).filter((q) => { const u = unitAt(q.x, q.y); return u && u.team === 'player'; }).length;
+      if (n > bn) { bn = n; best = c; }
+    }
+    if (best) { await executeSkill(e, sk, best); return true; }
+  }
+  if (sk.id === 'iaido' || sk.id === 'pin') {
+    const t = players.filter((p) => inRange(e, p, sk.range)).sort((a, b) => a.u.hp - b.u.hp)[0];
+    if (t) { await executeSkill(e, sk, { x: t.x, y: t.y }); return true; }
+  }
+  if (sk.id === 'rally' && alive('enemy').filter((a) => manhattan(a, e) <= 3).length >= 3) { await executeSkill(e, sk, null); return true; }
+  if (sk.id === 'sanctuary' && alive('enemy').some((a) => manhattan(a, e) <= 2 && a.u.hp < maxHp(a.u) * 0.6)) { await executeSkill(e, sk, null); return true; }
+  return false;
+}

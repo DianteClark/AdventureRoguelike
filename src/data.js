@@ -266,3 +266,46 @@ export const FX = {
   boom:  { path: 'FX/Elemental/Explosion/SpriteSheet.png', fw: 40, fh: 40, frames: 9 },
 };
 export const FAMILY_FX = { blade: 'slash', dagger: 'twin', heavy: 'heavy', polearm: 'pierce', bow: 'cut', whip: 'cut', staff: 'magic', tome: 'magic' };
+
+FX.quake = { path: 'FX/Elemental/RockSpike/SpriteSheet.png', fw: 54, fh: 48, frames: 10 };
+FX.thunder = { path: 'FX/Elemental/Thunder/SpriteSheet.png', fw: 20, fh: 28, frames: 8 };
+FX.spark = { path: 'FX/Magic/Circle/SpriteSheetSpark.png', fw: 32, fh: 32, frames: 6 };
+FX.shield = { path: 'FX/Magic/Shield/SpriteSheetYellow.png', fw: 24, fh: 26, frames: 6 };
+FX.boost = { path: 'FX/Magic/Boost/SpriteSheet.png', fw: 53, fh: 35, frames: 8 };
+
+// ---------------------------------------------------------------- Status effects
+const SP = 'Ui/Skill Icon/Spell/';
+export const STATUS = {
+  burn:   { label: 'Burn', icon: SP + 'OrbFire.png', color: '#ff9b3b', desc: '3 damage each turn' },
+  poison: { label: 'Poison', icon: SP + 'OrbPlant.png', color: '#9be06a', desc: '2 damage each turn' },
+  chill:  { label: 'Chill', icon: SP + 'BookIce.png', color: '#9fdcff', desc: '-2 move' },
+  root:   { label: 'Rooted', icon: SP + 'BookPlant.png', color: '#c8e07a', desc: 'Cannot move' },
+  stun:   { label: 'Stunned', icon: SP + 'Mist.png', color: '#ffe27a', desc: 'Loses next action' },
+  atkUp:  { label: 'Rallied', icon: SP + 'AttackUpgrade.png', color: '#ff7a6b', desc: '+ATK', buff: true },
+  defUp:  { label: 'Guarded', icon: SP + 'DefenseUpgrade.png', color: '#7fd0ff', desc: '+DEF', buff: true },
+};
+// on-hit statuses for monsters: [status, chance, turns]
+export function monsterOnHit(key) {
+  const m = MONSTERS[key];
+  if (!m) return null;
+  if (m.fx === 'fire') return ['burn', 0.35, 2];
+  if (key.startsWith('Snake') || key.startsWith('Spider')) return ['poison', 0.4, 3];
+  if (key.startsWith('Mushroom')) return ['poison', 0.3, 3];
+  if (m.fx === 'ice' || ['Slime3', 'Larva2', 'SkullBlue', 'Cyclope2', 'Mushroom2', 'Octopus2'].includes(key)) return ['chill', 0.35, 2];
+  if (m.fx === 'heavy') return ['stun', 0.18, 1];
+  return null;
+}
+
+// ---------------------------------------------------------------- Class skills
+export const SKILLS = {
+  ronin:   { id: 'iaido', name: 'Iaido', icon: SP + 'Cut.png', cd: 3, target: 'enemy', range: [1, 1], desc: 'Lightning draw: 170% damage, cannot be countered.' },
+  brawler: { id: 'quake', name: 'Earthshaker', icon: SP + 'RockSpike.png', cd: 3, target: 'self', desc: 'Slam the ground: strike every adjacent foe, 50% to stun.' },
+  hunter:  { id: 'pin', name: 'Pinning Shot', icon: 'Ui/Skill Icon/Items & Weapon/Arrow.png', cd: 3, target: 'enemy', range: [2, 4], desc: 'A long shot (2-4) that roots the target in place.' },
+  guard:   { id: 'bulwark', name: 'Bulwark', icon: SP + 'DefenseUpgrade.png', cd: 3, target: 'self', desc: '+4 DEF to you, +2 DEF to adjacent allies for 2 turns.' },
+  shadow:  { id: 'shadowstep', name: 'Shadowstep', icon: SP + 'Camouflage.png', cd: 3, target: 'enemy', range: [1, 5], desc: 'Vanish and reappear beside a foe up to 5 tiles away, then strike. No counter.' },
+  mystic:  { id: 'fireball', name: 'Fireball', icon: SP + 'Fireball.png', cd: 3, target: 'tile', range: [1, 3], desc: 'Explodes in a cross (range 1-3), burning foes.' },
+  monk:    { id: 'sanctuary', name: 'Sanctuary', icon: SP + 'Heal.png', cd: 4, target: 'self', desc: 'Heal all allies within 2 and cleanse their ailments.' },
+  farmer:  { id: 'rally', name: 'Rally Cry', icon: 'Ui/Skill Icon/Job & Action/Sing.png', cd: 4, target: 'self', desc: 'Allies within 3 gain +3 ATK for 2 turns.' },
+};
+
+export const CHAMPION_TITLES = ['Grim', 'Old', 'Red-Eyed', 'Mad', 'Iron', 'Hollow', 'Pale', 'Great', 'Cursed', 'Ancient', 'Bloodied', 'Howling'];

@@ -220,3 +220,6 @@ h3 { font-size: 18px; }
 .bigmap { width: 100%; height: auto; image-rendering: pixelated; border: 3px solid #2a1e1a; outline: 2px solid #c9a77e; }
 .hud-stats { flex-wrap: wrap; }
 @media (max-width: 430px) { .hide-narrow { display: none; } .minimap { width: 76px; height: 76px; } .hud-member, .hud-member img { width: 38px; } .hud-member img { height: 38px; } }
+
+.btn.skill { color: #3a1450; }
+.btn.skill .icon { width: 20px; height: 20px; vertical-align: middle; image-rendering: pixelated; }

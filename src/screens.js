@@ -1,6 +1,6 @@
 // UI screens: HUD, title, party, villages, events, loot, victory and death.
 import { G, saveRun, eraseRun, hasSave, loadRun, day, hero, MAX_PARTY, MAX_BAG, recordDeath, graves } from './state.js';
-import { BACKGROUNDS, HERO_BACKGROUNDS, HERO_SPRITE, CONSUMABLES, MONSTERS, charFace } from './data.js';
+import { BACKGROUNDS, HERO_BACKGROUNDS, HERO_SPRITE, CONSUMABLES, MONSTERS, charFace, SKILLS, STATUS } from './data.js';
 import {
   makeHero, makeRecruit, randomLoot, randomWeapon, randomGear, makeConsumable, itemName, itemValue, stats, maxHp,
   randomName, gainXp, XP_TO_LEVEL,
@@ -179,6 +179,9 @@ function unitDetail(u, rerender, close) {
         hpBar(u), xpBar(u))),
     unitStatLine(u),
     u.quirk ? h('div', { class: 'small dim', style: { marginTop: '4px' } }, `"${u.quirk}"`) : null,
+    SKILLS[u.bg] ? h('div', { class: 'row small', style: { marginTop: '6px', alignItems: 'flex-start' } },
+      h('img', { src: url(SKILLS[u.bg].icon), style: { width: '28px', imageRendering: 'pixelated' } }),
+      h('div', {}, h('span', { style: { color: '#e0b0ff' } }, `${SKILLS[u.bg].name} `), h('span', { class: 'dim' }, `(cooldown ${SKILLS[u.bg].cd}) ${SKILLS[u.bg].desc}`))) : null,
     h('div', { class: 'small', style: { marginTop: '6px' } }, 'Weapon'),
     u.weapon ? itemCard(u.weapon, [button('Unequip', () => { unequip(u, 'weapon'); rerender(); }, 'small', G.bag.length >= MAX_BAG)]) : h('div', { class: 'dim small' }, 'Bare hands'),
     h('div', { class: 'small' }, 'Gear'),
@@ -532,14 +535,28 @@ export function renderBattleBar(s) {
     const panel = h('div', { class: 'forecast panel' }, unitInfo(s.inspect));
     root.appendChild(panel);
   }
+  const skillBtn = () => {
+    if (!s.skill) return null;
+    const ready = !(s.skillCd > 0);
+    const b = button('', s.onSkill, `skill ${ready ? 'glow' : ''}`, !ready);
+    add(b, h('img', { src: url(s.skill.icon), class: 'icon' }), ` ${s.skill.name}${ready ? '' : ` (${s.skillCd})`}`);
+    return b;
+  };
+  if (s.state === 'skill' && s.sel) {
+    add(root, h('div', { class: 'forecast panel small center' },
+      h('div', { style: { color: '#e0b0ff' } }, s.skill.name), s.skill.desc,
+      h('div', { class: 'dim' }, s.skill.id === 'fireball' ? 'Tap a purple tile to aim, tap again to cast.' : 'Tap a purple tile.')));
+    add(bar, button('Cancel', s.onCancel));
+    return;
+  }
   if (s.state === 'selected' && s.sel) {
-    root.appendChild(h('div', { class: 'forecast panel' }, unitInfo(s.sel)));
-    add(bar, button('Wait here', s.onWait), button('Cancel', s.onDeselect));
+    add(root, h('div', { class: 'forecast panel' }, unitInfo(s.sel)));
+    add(bar, skillBtn(), button('Wait', s.onWait), button('Cancel', s.onDeselect));
     return;
   }
   if (s.state === 'action' && s.sel) {
-    root.appendChild(h('div', { class: 'forecast panel small center' }, 'Tap a red foe to attack' + (stats(s.sel.u).heals ? ', or a green ally to heal' : '') + '.'));
-    add(bar, button('Wait', s.onWait), s.canUndo ? button('Undo move', s.onUndo) : null);
+    add(root, h('div', { class: 'forecast panel small center' }, 'Tap a red foe to attack' + (stats(s.sel.u).heals ? ', or a green ally to heal' : '') + (s.skill ? `, or use ${s.skill.name}` : '') + '.'));
+    add(bar, skillBtn(), button('Wait', s.onWait), s.canUndo ? button('Undo', s.onUndo) : null);
     return;
   }
   if (s.state === 'busy') return;
@@ -559,6 +576,10 @@ function unitInfo(b) {
         hpBar(u))),
     unitStatLine(u),
     u.weapon ? h('div', { class: `small tname t${u.weapon.tier}` }, itemName(u.weapon)) : null,
+    Object.keys(b.st || {}).length ? h('div', { class: 'small row', style: { flexWrap: 'wrap', gap: '2px 8px' } },
+      Object.entries(b.st).map(([k, v]) => h('span', { style: { color: STATUS[k].color } }, h('img', { src: url(STATUS[k].icon), class: 'icon', style: { width: '14px', verticalAlign: 'middle' } }), ` ${STATUS[k].label} ${v.turns}`))) : null,
+    u.bg && SKILLS[u.bg] && !u.monster ? h('div', { class: 'small', style: { color: '#e0b0ff' } }, `${SKILLS[u.bg].name}: `, h('span', { class: 'dim' }, SKILLS[u.bg].desc)) : null,
+    b.champion ? h('div', { class: 'small', style: { color: '#ffd23d' } }, 'Champion — tougher, and guards better loot.') : null,
     b.team === 'enemy' ? h('div', { class: 'small dim' }, 'Shaded tiles: where it can move and strike.') : null);
 }
 
