@@ -337,7 +337,7 @@ export function worldRender() {
   drawWorldObjects(null);
   drawParticles();
   drawLighting(worldLights());
-  drawFog(w, visible);
+  drawFog(w, visible, { x: G.player.rx / TILE, y: G.player.ry / TILE }, viewR());
   drawWeather(lastDt);
 }
 

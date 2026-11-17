@@ -197,24 +197,44 @@ export function drawText(text, wx, wy, color = '#fff', size = 8, alpha = 1) {
   ctx.globalAlpha = 1;
 }
 
-// Soft fog: a 1px-per-tile canvas scaled up with smoothing.
+// Fog of war, drawn as crisp pixel-art cells (4 per tile) with stepped edges.
+// Explored state is interpolated between tile centers so edges curve, then
+// quantized into a few bands — no smoothing/blur anywhere.
 const fogCanvas = document.createElement('canvas');
 const fogCtx = fogCanvas.getContext('2d');
-export function drawFog(world, visible) {
+const SUB = 8; // cells per tile (2 art-pixels each)
+export function drawFog(world, visible, center = null, radius = 7) {
   const r = visibleTileRect(world);
-  const w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1;
+  const tw = r.x1 - r.x0 + 1, th = r.y1 - r.y0 + 1;
+  const w = tw * SUB, h = th * SUB;
   if (fogCanvas.width !== w || fogCanvas.height !== h) { fogCanvas.width = w; fogCanvas.height = h; }
   const data = fogCtx.createImageData(w, h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = (r.y0 + y) * world.W + (r.x0 + x);
-    const a = !world.explored[i] ? 255 : visible.has(i) ? 0 : 110;
-    data.data[(y * w + x) * 4 + 3] = a;
-    data.data[(y * w + x) * 4 + 0] = 12; data.data[(y * w + x) * 4 + 1] = 10; data.data[(y * w + x) * 4 + 2] = 20;
+  const W = world.W, H = world.H, ex = world.explored;
+  const E = (x, y) => (x < 0 || y < 0 || x >= W || y >= H) ? 0 : ex[y * W + x];
+  const V = (x, y) => (x < 0 || y < 0 || x >= W || y >= H) ? 0 : (visible.has(y * W + x) ? 1 : 0);
+  const cx = center ? center.x + 0.5 : 0, cy = center ? center.y + 0.5 : 0;
+  const d = data.data;
+  for (let sy = 0; sy < h; sy++) {
+    const fy = r.y0 + (sy + 0.5) / SUB - 0.5;
+    const y0 = Math.floor(fy), ty = fy - y0;
+    for (let sx = 0; sx < w; sx++) {
+      const fx = r.x0 + (sx + 0.5) / SUB - 0.5;
+      const x0 = Math.floor(fx), tx = fx - x0;
+      // bilinear explored / visible between tile centers
+      const e = (E(x0, y0) * (1 - tx) + E(x0 + 1, y0) * tx) * (1 - ty) + (E(x0, y0 + 1) * (1 - tx) + E(x0 + 1, y0 + 1) * tx) * ty;
+      let v = (V(x0, y0) * (1 - tx) + V(x0 + 1, y0) * tx) * (1 - ty) + (V(x0, y0 + 1) * (1 - tx) + V(x0 + 1, y0 + 1) * tx) * ty;
+      if (center) { // round light falloff around the player
+        const dist = Math.hypot(fx + 0.5 - cx, fy + 0.5 - cy);
+        v = Math.min(v, Math.max(0, Math.min(1, (radius - dist) / 1.6)));
+      }
+      let a = (1 - e) * 1 + e * (1 - v) * 0.45;
+      a = Math.round(a * 6) / 6; // stepped bands, pixel-art style
+      const o = (sy * w + sx) * 4;
+      d[o] = 12; d[o + 1] = 10; d[o + 2] = 20; d[o + 3] = Math.round(a * 255);
+    }
   }
   fogCtx.putImageData(data, 0, 0);
-  const [sx, sy] = toScreen(r.x0 * TILE, r.y0 * TILE);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(fogCanvas, 0, 0, w, h, sx - T() / 2, sy - T() / 2, w * T(), h * T());
-  // hard cover for tiles never seen so nothing leaks through the blur edge
+  const [px, py] = toScreen(r.x0 * TILE, r.y0 * TILE);
   ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(fogCanvas, 0, 0, w, h, px, py, tw * T(), th * T());
 }
