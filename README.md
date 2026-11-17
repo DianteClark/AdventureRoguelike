@@ -1,12 +1,14 @@
 # Ronin Roads
 
+**▶ Play it: https://dianteclark.github.io/AdventureRoguelike/**
+
 A sandbox tactical roguelike that runs in the browser. You start the journey alone. You can recruit a band of misfits or stay solo. Battles happen on the ground where you meet your enemies. **When your leader dies, the run is over.**
 
 Built with plain HTML, CSS and JavaScript (ES modules, no build step), using art and audio from the [Ninja Adventure asset pack](https://pixel-boy.itch.io/ninja-adventure-asset-pack) by Pixel-boy and AAA (CC0).
 
 ## Play
 
-- **Online:** GitHub Pages (once it's enabled for this repo): `https://dianteclark.github.io/AdventureRoguelike/`
+- **Online:** https://dianteclark.github.io/AdventureRoguelike/ (works on phones and desktop)
 - **Locally:** serve the folder with any static server, then open `http://localhost:8000`. (A server is required because ES modules don't load from `file://`.)
   ```sh
   python3 -m http.server 8000
