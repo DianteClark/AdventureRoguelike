@@ -14,8 +14,13 @@ import { startBattle } from './battle.js';
 import { rand } from './rng.js';
 import { dust, drawParticles, shake, transition, sparks } from './fx.js';
 import { BIOME } from './tiles.js';
+import { drawLighting, worldLights, drawWeather, updateWeather, isNight, phase, currentBiome, WEATHER_NAME, weatherKind } from './atmosphere.js';
+import { banner } from './fx.js';
+import { currentMusic } from './assets.js';
 
-const VIEW_R = 7;
+const viewR = () => (isNight() ? 5 : 7);
+let lastDt = 0.016;
+let lastBiome = -1, lastPhase = null;
 let visible = new Set();
 let footprint = new Map(); // idx -> poi (tiles covered by building art)
 let pathQueue = [];
@@ -62,16 +67,18 @@ export function enterWorld() {
   computeFootprints();
   updateVisibility();
   centerCamera(true);
-  if (fresh) playMusic(rand.chance(0.5) ? 'world' : 'world2');
+  updateWeather();
+  lastBiome = currentBiome(); lastPhase = phase();
+  if (fresh) playMusic(biomeMusic());
   screens.renderHud();
 }
 
 function updateVisibility() {
   visible = new Set();
   const w = G.world, { x: px, y: py } = G.player;
-  const r = Math.ceil(VIEW_R);
+  const R = viewR(), r = Math.ceil(R);
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-    if (dx * dx + dy * dy > VIEW_R * VIEW_R) continue;
+    if (dx * dx + dy * dy > R * R) continue;
     const x = px + dx, y = py + dy;
     if (x < 0 || y < 0 || x >= w.W || y >= w.H) continue;
     visible.add(idx(x, y));
@@ -153,8 +160,21 @@ export function worldKey(dx, dy) {
 }
 
 // ------------------------------------------------------------------ Update
+export function biomeMusic() {
+  if (isNight()) return 'night';
+  const b = currentBiome();
+  return b === BIOME.SNOW ? 'snow' : b === BIOME.SAND ? 'desert' : (G.world.seed % 2 ? 'world' : 'world2');
+}
+
+const BIOME_INTRO = [
+  ['GREENLANDS', 'Rolling hills and old roads'],
+  ['EMBER DUNES', 'The sun is merciless here'],
+  ['FROSTREACH', 'Cold winds and colder blades'],
+];
+
 export function worldUpdate(dt) {
   animT += dt;
+  lastDt = dt;
   if (tapMark) { tapMark.t += dt; if (tapMark.t > 0.7 && !pathQueue.length) tapMark = null; }
   for (const e of G.world.enemies) if (e.alert > 0) e.alert -= dt;
   const p = G.player;
@@ -192,10 +212,23 @@ function onStep() {
   G.steps++;
   dust(G.player.fromX * TILE + 8, G.player.fromY * TILE + 15, DUST[G.world.biome[idx(G.player.x, G.player.y)]]);
   const before = day();
+  const b = currentBiome();
+  if (b !== lastBiome) {
+    lastBiome = b;
+    banner(BIOME_INTRO[b][0], { color: ['#9be06a', '#ffb45a', '#bfe6ff'][b], sub: BIOME_INTRO[b][1], dur: 2.2, size: 0.8 });
+    if (!isNight()) playMusic(biomeMusic());
+  }
+  const ph = phase();
+  if (ph !== lastPhase) {
+    if (ph === 'night') { banner('NIGHTFALL', { color: '#9fb4ff', sub: 'Vision shrinks. Monsters roam bolder.', dur: 2, size: 0.7 }); playMusic('night'); }
+    if (ph === 'dawn') { banner('DAWN', { color: '#ffd29a', sub: `Day ${day()}`, dur: 1.8, size: 0.7 }); playMusic(biomeMusic()); }
+    lastPhase = ph;
+  }
+  updateWeather();
   if (G.steps % 5 === 0) for (const u of G.party) if (u.alive) u.hp = Math.min(maxHp(u), u.hp + 1);
   updateVisibility();
   moveEnemies();
-  if (day() !== before) toast(`Day ${day()}`);
+
   screens.renderHud();
   if (G.steps % 8 === 0) saveRun();
 
@@ -235,7 +268,7 @@ function moveEnemies() {
     const d = manhattan(e, p);
     if (d > 18) continue;
     const seen = visible.has(idx(e.x, e.y));
-    if (seen && d <= 6) {
+    if (seen && d <= (isNight() ? 8 : 6)) {
       if (!(e.chase > 0)) { e.alert = 1.2; sfx('alert', 0.3); }
       e.chase = 7;
     }
@@ -303,7 +336,9 @@ export function worldRender() {
   drawPathPreview();
   drawWorldObjects(null);
   drawParticles();
+  drawLighting(worldLights());
   drawFog(w, visible);
+  drawWeather(lastDt);
 }
 
 function drawPathPreview() {

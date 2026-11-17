@@ -12,6 +12,7 @@ import { playMusic, sfx } from './assets.js';
 import { rand } from './rng.js';
 import * as screens from './screens.js';
 import { toast, modalOpen } from './ui.js';
+import { drawLighting, drawWeather, darkness } from './atmosphere.js';
 import { shake, flash, hitstop, sparks, blood, burst, coins, healMotes, smokePuff, banner, vsIntro, dust, drawParticles, levelUpFx } from './fx.js';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -644,9 +645,10 @@ export function renderBattleUi() {
 }
 
 // ------------------------------------------------------------------ Update & render
+let bdt = 0.016;
 export function battleUpdate(dt) {
   if (!B) return;
-  time += dt;
+  time += dt; bdt = dt;
   for (const f of B.fx) f.t += dt;
   B.fx = B.fx.filter((f) => f.t < f.dur);
   for (const t of B.texts) t.t += dt;
@@ -745,6 +747,17 @@ export function battleRender() {
 
   for (const f of B.fx) drawFx(f, f.x * TILE, f.y * TILE, f.t / f.dur);
   drawParticles();
+  const dk = darkness() * 0.8;
+  if (dk > 0.01) {
+    const lights = B.units.filter((b) => !b.dead).map((b) => ({
+      x: b.rx + 8, y: b.ry + 8, r: b.team === 'player' ? 44 : 26,
+      color: b.team === 'player' ? 'rgba(255,200,120,0.3)' : (b.u.monster && ['fire', 'magic'].includes(MONSTERS[b.u.monster].fx) ? 'rgba(255,120,60,0.5)' : null),
+      flicker: true,
+    }));
+    for (const f of B.fx) lights.push({ x: f.x * TILE + 8, y: f.y * TILE + 8, r: 40, color: 'rgba(255,220,160,0.5)' });
+    drawLighting(lights, dk);
+  }
+  drawWeather(bdt);
   for (const t of B.texts) {
     const pop = 1 + Math.max(0, 0.15 - t.t) * 5;
     const rise = (1 - Math.pow(1 - Math.min(1, t.t * 1.6), 3)) * 12;

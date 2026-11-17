@@ -75,11 +75,26 @@ export function unlockAudio() {
   if (audio.unlocked) return;
   audio.unlocked = true;
   if (music && audio.musicOn) music.play().catch(() => {});
+  if (typeof amb !== 'undefined' && amb && audio.musicOn) amb.play().catch(() => {});
 }
 
 export function toggleMusic() {
   audio.musicOn = !audio.musicOn;
   if (music) { if (audio.musicOn) music.play().catch(() => {}); else music.pause(); }
+  if (amb) { if (audio.musicOn) amb.play().catch(() => {}); else amb.pause(); }
   saveAudioPrefs();
 }
 export function toggleSfx() { audio.sfxOn = !audio.sfxOn; saveAudioPrefs(); }
+
+// ---------- Ambient loop (rain / wind)
+let amb = null, ambName = null;
+export function playAmbient(name, vol = 0.35) {
+  if (ambName === name) { if (amb && audio.musicOn && audio.unlocked && amb.paused) amb.play().catch(() => {}); return; }
+  if (amb) { amb.pause(); amb = null; }
+  ambName = name;
+  if (!name) return;
+  amb = new Audio(`${A}audio/sfx/${name}.mp3`);
+  amb.loop = true; amb.volume = vol;
+  if (audio.musicOn && audio.unlocked) amb.play().catch(() => {});
+}
+export const currentMusic = () => musicName;

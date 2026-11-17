@@ -15,6 +15,7 @@ import { TRAVEL_EVENTS, WANDERER_EVENTS, SHRINE_EVENT } from './events.js';
 import { tierAt, makeGroup } from './worldgen.js';
 import { BIOME } from './tiles.js';
 import { levelUpFx, banner, coins, sparks, shake } from './fx.js';
+import { phaseLabel, isNight, weatherKind, WEATHER_NAME, renderMinimap } from './atmosphere.js';
 
 // late-bound to avoid import cycles
 let api = {};
@@ -28,12 +29,19 @@ export function renderHud() {
   const hud = hudContainer();
   const stats = h('div', { class: 'panel hud-stats' },
     h('span', { class: G.gold !== lastGold ? 'pop' : '' }, h('img', { src: url('Items/Object/MoneyBag.png'), class: 'icon' }), ` ${G.gold}`),
-    h('span', {}, `Day ${day()}`));
+    h('span', {}, h('img', { src: url(`Ui/Skill Icon/Meteo/${isNight() ? 'Moon' : ({ rain: 'Rain', storm: 'Rain', snow: 'Snow', blizzard: 'Snow' }[weatherKind()] || 'Sun')}.png`), class: 'icon' }), ` Day ${day()}`),
+    h('span', { class: 'small dim hide-narrow' }, `${phaseLabel()} · ${WEATHER_NAME[weatherKind()]}`));
   const party = h('div', { class: 'hud-party' },
     G.party.map((u) => h('div', { class: `hud-member ${u.alive ? '' : 'dead'} ${u.alive && u.hp / maxHp(u) < 0.3 ? 'danger' : ''}`, onClick: () => { if (G.scene === 'world') showParty(u); } },
       h('img', { src: faceUrl(spriteOf(u)), alt: u.name }), hpBar(u))));
   lastGold = G.gold;
-  add(hud, stats, party, h('div', { class: 'right' }, button('≡', showMenu, 'small')));
+  const right = h('div', { class: 'right hud-right' }, button('≡', showMenu, 'small'));
+  if (G.scene === 'world') {
+    const mm = h('canvas', { class: 'minimap', onClick: () => showMap() });
+    renderMinimap(mm, 3, { window: 32 });
+    right.append(mm);
+  }
+  add(hud, stats, party, right);
   if (G.scene === 'world') {
     const bar = bottomBar();
     add(bar, button('Party', () => showParty()), button(`Bag ${G.bag.length}/${MAX_BAG}`, () => showParty(null, 'bag')));
@@ -41,6 +49,19 @@ export function renderHud() {
 }
 
 export const spriteOf = (u) => (u.kind === 'monster' ? { kind: 'monster', name: u.sprite } : { kind: 'char', name: u.sprite });
+
+export function showMap() {
+  const big = h('canvas', { class: 'bigmap' });
+  renderMinimap(big, 4);
+  const q = G.flags.guardians || 0;
+  openModal(h('div', { class: 'col' },
+    h('div', { class: 'title' }, h('h2', { class: 'grow' }, 'Map'), button('✕', () => closeAllModals(), 'small')),
+    big,
+    h('div', { class: 'small row', style: { flexWrap: 'wrap', gap: '4px 12px' } },
+      h('span', { style: { color: '#ffd23d' } }, '■ Village'), h('span', { style: { color: '#ff4a4a' } }, '■ Lair'),
+      h('span', { style: { color: '#ff2a6a' } }, '■ Guardian'), h('span', { style: { color: '#9fdcff' } }, '■ Shrine'),
+      h('span', { style: { color: '#f0c060' } }, '■ Chest'), h('span', {}, '■ You'))));
+}
 
 function showMenu() {
   const close = openModal(h('div', { class: 'col' },
