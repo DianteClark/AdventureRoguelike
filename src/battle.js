@@ -12,6 +12,7 @@ import { playMusic, sfx } from './assets.js';
 import { rand } from './rng.js';
 import * as screens from './screens.js';
 import { toast, modalOpen } from './ui.js';
+import { shake, flash, hitstop, sparks, blood, burst, coins, healMotes, smokePuff, banner, vsIntro, dust, drawParticles, levelUpFx } from './fx.js';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let B = null; // current battle
@@ -83,11 +84,14 @@ export function startBattle(opts) {
   G.stats.battles++;
   fitCamera();
   playMusic(rand.chance(0.5) ? 'battle' : 'battle2');
-  sfx('alert', 0.5);
   screens.renderHud();
+  B.busy = true;
   renderBattleUi();
-  banner(`${opts.name}!`);
-  setTimeout(() => banner('Your turn'), 1100);
+  const leader = units.find((b) => b.team === 'enemy');
+  const h = units.find((b) => b.u.hero) || units[0];
+  sfx('impact', 0.6);
+  vsIntro(h.sprite, leader ? leader.sprite : h.sprite, opts.name, opts.sub || `${foes.length} foe${foes.length > 1 ? 's' : ''}${opts.elite ? ' · Elite' : ''}`);
+  setTimeout(() => { if (!B) return; B.busy = false; banner('YOUR TURN', { color: '#7fd0ff', dur: 1.0 }); sfx('menu', 0.6); renderBattleUi(); }, 1750);
 }
 
 function wrap(u, team, t) {
@@ -184,14 +188,25 @@ async function strike(att, def, info, isCounter = false) {
   for (let s = 0; s < info.strikes && !def.dead && !killed; s++) {
     const hitRoll = rand.int(1, 100) <= info.hit;
     B.fx.push({ kind: fxKind, x: def.x, y: def.y, t: 0, dur: 0.38 });
-    if (!hitRoll) { floatText(def, 'Miss', '#cfd8ff'); sfx('cancel', 0.4); }
-    else {
+    const cx = def.x * TILE + 8, cy = def.y * TILE + 6;
+    if (!hitRoll) {
+      floatText(def, 'Miss', '#cfd8ff'); sfx('cancel', 0.4); dust(cx, cy + 6, '#ffffff');
+      def.dodge = { t: 0, dx: def.x === att.x ? 1 : 0, dy: def.y === att.y ? 1 : 0 };
+    } else {
       const crit = rand.int(1, 100) <= info.crit;
       let dmg = Math.max(1, Math.round(info.dmg * (crit ? 1.5 : 1) * rand.float(0.9, 1.1)));
       killed = dealDamage(def, dmg, att);
       def.flash = 0.25;
+      def.knock = { t: 0, dx: Math.sign(def.x - att.x), dy: Math.sign(def.y - att.y) };
       sfx(crit ? 'impact' : 'hit', 0.8);
-      floatText(def, crit ? `${dmg}!` : `${dmg}`, crit ? '#ffd27a' : '#ffffff', crit ? 10 : 8);
+      if (crit) {
+        hitstop(110); shake(5, 0.35); flash('#ffffff', 0.35, 0.15);
+        sparks(cx, cy, '#ffd27a', 22);
+        floatText(def, 'CRIT!', '#ffd27a', 7, -9);
+      } else { shake(2, 0.18); hitstop(45); sparks(cx, cy, '#ffffff', 10); }
+      if (def.u.kind === 'monster') burst(cx, cy, { n: 6, colors: [monsterBlood(def.u.monster)], speed: 60, life: 0.45, g: 240, size: 1.5 });
+      else blood(cx, cy);
+      floatText(def, crit ? `${dmg}!` : `${dmg}`, crit ? '#ffd27a' : '#ffffff', crit ? 12 : 9);
       addXp(att, 6);
       if (a.lifesteal > 0) heal(att, Math.max(1, Math.round(dmg * a.lifesteal)), false);
       const ds = stats(def.u);
@@ -226,6 +241,10 @@ async function kill(victim, killer) {
   victim.dead = true;
   victim.u.hp = 0;
   B.fx.push({ kind: 'smoke', x: victim.x, y: victim.y, t: 0, dur: 0.5 });
+  smokePuff(victim.x * TILE + 8, victim.y * TILE + 8);
+  burst(victim.x * TILE + 8, victim.y * TILE + 8, { n: 16, colors: victim.team === 'enemy' ? ['#ffd27a', '#fff', '#ff9b6b'] : ['#7fd0ff', '#fff'], speed: 90, life: 0.6, g: 150, size: 1.6, glow: true });
+  shake(4, 0.3);
+  if (victim.u.hero) { flash('#ff2a2a', 0.45, 0.6); hitstop(300); }
   sfx('explosion', 0.35);
   if (killer && !killer.dead) {
     const ks = stats(killer.u);
@@ -243,7 +262,7 @@ function heal(b, amount, show = true) {
   const before = b.u.hp;
   b.u.hp = Math.min(maxHp(b.u), b.u.hp + amount);
   const got = b.u.hp - before;
-  if (got > 0) floatText(b, `+${got}`, '#8fe07a');
+  if (got > 0) { floatText(b, `+${got}`, '#8fe07a'); if (show) healMotes(b.x * TILE + 8, b.y * TILE + 10); }
   return got;
 }
 
@@ -254,8 +273,18 @@ function face(a, t) {
   a.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 3 : 2) : (dy < 0 ? 1 : 0);
 }
 
-function floatText(b, text, color, size = 8) {
-  B.texts.push({ x: b.x * TILE + 8, y: b.y * TILE - 2, text, color, size, t: 0 });
+function floatText(b, text, color, size = 8, dy = 0) {
+  const stack = B.texts.filter((t) => t.ux === b.x && t.uy === b.y && t.t < 0.3).length;
+  B.texts.push({ x: b.x * TILE + 8 + (Math.random() - 0.5) * 4, y: b.y * TILE - 2 + dy - stack * 7, text, color, size, t: 0, ux: b.x, uy: b.y });
+}
+function monsterBlood(key) {
+  const m = MONSTERS[key];
+  if (!m) return '#e0493f';
+  if (key.startsWith('Slime')) return key === 'Slime3' ? '#9fdcff' : '#8fe07a';
+  if (m.fx === 'fire') return '#ff9b3b';
+  if (m.fx === 'ice' || key.includes('Blue')) return '#9fdcff';
+  if (m.magic) return '#c58bff';
+  return '#e0493f';
 }
 
 async function attack(att, def) {
@@ -436,8 +465,9 @@ async function endPlayerTurn() {
   if (!B || B.phase !== 'player') return;
   B.phase = 'enemy'; B.state = 'idle'; B.sel = null; B.reach = null; B.inspect = null;
   renderBattleUi();
-  banner('Enemy turn');
-  await wait(600);
+  banner('ENEMY TURN', { color: '#ff7a6b', dur: 0.9 });
+  sfx('alert', 0.4);
+  await wait(800);
   await turnStartEffects('enemy');
   for (const e of alive('enemy')) {
     if (!B || B.over) return;
@@ -451,7 +481,8 @@ async function endPlayerTurn() {
   for (const b of B.units) { b.acted = false; b.moved = false; }
   await turnStartEffects('player');
   if (checkEnd()) return;
-  banner('Your turn');
+  banner('YOUR TURN', { color: '#7fd0ff', dur: 0.9 });
+  sfx('menu', 0.6);
   renderBattleUi();
 }
 
@@ -520,8 +551,20 @@ async function enemyAct(e) {
 function checkEnd() {
   if (!B || B.over) return true;
   const h = B.units.find((b) => b.u.hero);
-  if (!h || h.dead) { B.over = true; setTimeout(() => defeat(), 900); return true; }
-  if (!alive('enemy').length) { B.over = true; setTimeout(() => victory(), 700); return true; }
+  if (!h || h.dead) {
+    B.over = true;
+    setTimeout(() => { banner('DEFEAT', { color: '#ff4a4a', sub: 'The road ends here', dur: 2.2, size: 1.2 }); sfx('gameover', 0.7); }, 500);
+    setTimeout(() => defeat(), 2600); return true;
+  }
+  if (!alive('enemy').length) {
+    B.over = true;
+    setTimeout(() => {
+      banner('VICTORY!', { color: '#ffd27a', dur: 1.6, size: 1.2 });
+      sfx('victory', 0.8);
+      for (const p of alive('player')) { coins(p.x * TILE + 8, p.y * TILE + 4, 10); p.cheer = 1.4; }
+    }, 350);
+    setTimeout(() => victory(), 1900); return true;
+  }
   return false;
 }
 
@@ -545,7 +588,6 @@ async function retreat() {
 }
 
 function victory() {
-  sfx('victory', 0.8);
   const enemies = B.units.filter((b) => b.team === 'enemy');
   const goldBonus = Math.max(0, ...alive('player').map((b) => stats(b.u).gold));
   const gold = Math.round(enemies.reduce((s, e) => s + 4 + e.u.level * 3 + (e.u.isBandit ? 6 : 0), 0) * (1 + goldBonus) * rand.float(0.85, 1.2));
@@ -582,7 +624,6 @@ function endBattle(dead = false) {
 }
 
 // ------------------------------------------------------------------ UI
-function banner(text) { toast(text, 1000); }
 
 export function renderBattleUi() {
   if (!B) return;
@@ -613,6 +654,9 @@ export function battleUpdate(dt) {
   for (const b of B.units) {
     if (b.flash > 0) b.flash -= dt;
     if (b.lunge) b.lunge.t = Math.min(1, b.lunge.t + dt * 6);
+    if (b.knock) { b.knock.t += dt * 7; if (b.knock.t >= 1) b.knock = null; }
+    if (b.dodge) { b.dodge.t += dt * 5; if (b.dodge.t >= 1) b.dodge = null; }
+    if (b.cheer > 0) b.cheer -= dt;
     if (b.dead) b.fade = (b.fade || 1) - dt * 2;
   }
 }
@@ -669,7 +713,12 @@ export function battleRender() {
     z: b.ry + TILE * 2 + 0.2, // above the canopy of trees one row below
     draw: () => {
       let ox = 0, oy = 0;
-      if (b.lunge) { const k = Math.sin(b.lunge.t * Math.PI) * 5; ox = b.lunge.dx * k; oy = b.lunge.dy * k; }
+      if (b.lunge) { const k = Math.sin(b.lunge.t * Math.PI) * 6; ox = b.lunge.dx * k; oy = b.lunge.dy * k; }
+      if (b.knock) { const k = Math.sin(b.knock.t * Math.PI) * 3; ox += b.knock.dx * k; oy += b.knock.dy * k; }
+      if (b.dodge) { const k = Math.sin(b.dodge.t * Math.PI) * 5; ox += b.dodge.dx * k; oy += b.dodge.dy * k; }
+      if (b.cheer > 0) oy -= Math.abs(Math.sin(b.cheer * 9)) * 4;
+      const breathe = b.sprite.kind !== 'monster' && !b.walk && Math.floor(time * 1.6 + b.x * 0.7) % 2 === 0 ? 0.5 : 0;
+      oy += breathe;
       const frame = b.sprite.kind === 'monster' ? Math.floor(time * 4 + b.x) % 4 : (b.walk ? Math.floor(b.walk / 6) % 4 : 0);
       drawActor(b.sprite, b.rx + ox, b.ry + oy, b.dir, frame, {
         ring: b.team === 'player' ? 'rgba(80,170,255,.45)' : 'rgba(255,70,60,.45)',
@@ -678,6 +727,11 @@ export function battleRender() {
       });
       if (!b.dead) drawHpBar(b.rx, b.ry, b.u.hp / maxHp(b.u), b.team === 'player' ? '#5fd0ff' : '#e0493f');
       if (b.u.hero && !b.dead) drawText('★', b.rx + 14, b.ry - 1, '#ffd27a', 6);
+      if (!b.dead && b.team === 'player' && B.phase === 'player' && !b.acted && B.sel !== b && !B.busy) {
+        const bob = Math.sin(time * 5 + b.x) * 1.2;
+        drawChevron(b.rx + 8, b.ry - 7 + bob, 'rgba(127,208,255,0.9)');
+      }
+      if (B.sel === b) drawChevron(b.rx + 8, b.ry - 9 + Math.sin(time * 8) * 2, '#ffd27a', 1.4);
     },
   }));
   drawWorldObjects(drawables, { battle: true });
@@ -690,7 +744,30 @@ export function battleRender() {
   ctx.fillRect(ax + aw, ay, view.w - ax - aw, ah);
 
   for (const f of B.fx) drawFx(f, f.x * TILE, f.y * TILE, f.t / f.dur);
-  for (const t of B.texts) drawText(t.text, t.x, t.y - t.t * 10, t.color, t.size, Math.min(1, 2 - t.t * 2));
+  drawParticles();
+  for (const t of B.texts) {
+    const pop = 1 + Math.max(0, 0.15 - t.t) * 5;
+    const rise = (1 - Math.pow(1 - Math.min(1, t.t * 1.6), 3)) * 12;
+    drawText(t.text, t.x, t.y - rise, t.color, t.size * pop, Math.min(1, 2.2 - t.t * 2.2));
+  }
+  // danger vignette when the leader is low
+  const hb = B.units.find((b) => b.u.hero && !b.dead);
+  if (hb && hb.u.hp / maxHp(hb.u) < 0.3) {
+    const g = ctx.createRadialGradient(view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.35, view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.7);
+    g.addColorStop(0, 'rgba(255,0,0,0)');
+    g.addColorStop(1, `rgba(200,0,0,${0.25 + Math.sin(time * 4) * 0.08})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, view.w, view.h);
+  }
+}
+
+function drawChevron(wx, wy, color, scale = 1) {
+  const S = view.S;
+  const x = Math.round((wx - view.camX) * S), y = Math.round((wy - view.camY) * S);
+  const w = 3 * S * scale, h = 2.5 * S * scale;
+  ctx.fillStyle = '#140c10';
+  ctx.beginPath(); ctx.moveTo(x - w - S, y - S); ctx.lineTo(x + w + S, y - S); ctx.lineTo(x, y + h + S); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.moveTo(x - w, y); ctx.lineTo(x + w, y); ctx.lineTo(x, y + h); ctx.closePath(); ctx.fill();
 }
 
 export const battleActive = () => !!B;

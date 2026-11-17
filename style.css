@@ -197,3 +197,19 @@ h3 { font-size: 18px; }
 .hero-pick .panel.sel { outline: 3px solid #ffd27a; }
 
 .log { font-size: 14px; color: var(--ink-dim); max-height: 140px; overflow-y: auto; }
+
+/* ---------- juice ---------- */
+@keyframes pop { 0% { transform: scale(1.5); color: #ffe27a; } 100% { transform: scale(1); } }
+.pop { display: inline-block; animation: pop .35s ease-out; }
+@keyframes danger { 0%,100% { box-shadow: 0 0 0 2px rgba(255,40,40,.0); } 50% { box-shadow: 0 0 0 3px rgba(255,40,40,.9); } }
+.hud-member.danger img { animation: danger 0.9s infinite; }
+@keyframes modalIn { from { transform: translateY(18px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal { animation: modalIn .22s cubic-bezier(.2,1.4,.4,1); }
+@keyframes backIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-back { animation: backIn .2s ease-out; }
+.btn { transition: transform .06s; }
+.btn:active { transform: translateY(2px) scale(.97); }
+@keyframes titleBob { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-6px) rotate(1deg); } }
+.title-screen h1 { animation: titleBob 3.2s ease-in-out infinite; }
+@keyframes glowPulse { 0%,100% { filter: drop-shadow(0 0 0 rgba(255,210,122,0)); } 50% { filter: drop-shadow(0 0 8px rgba(255,210,122,.8)); } }
+.btn.glow { animation: glowPulse 1.4s infinite; }

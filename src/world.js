@@ -12,6 +12,8 @@ import { maxHp } from './units.js';
 import * as screens from './screens.js';
 import { startBattle } from './battle.js';
 import { rand } from './rng.js';
+import { dust, drawParticles, shake, transition, sparks } from './fx.js';
+import { BIOME } from './tiles.js';
 
 const VIEW_R = 7;
 let visible = new Set();
@@ -20,6 +22,7 @@ let pathQueue = [];
 let pendingInteract = null;
 let animT = 0;
 let lastSpotted = new Set();
+let tapMark = null;
 
 const idx = (x, y) => y * G.world.W + x;
 const poiAt = (x, y) => G.world.pois.find((p) => p.x === x && p.y === y && !p.gone);
@@ -113,12 +116,16 @@ export function worldTap(sx, sy) {
     }
     if (!best) { toast("Can't reach that"); pendingInteract = null; return; }
     pathQueue = best.slice(1);
+    tapMark = { x: ix, y: iy, t: 0, hostile: !!enemy };
+    sfx('move', 0.25);
     return;
   }
   if (tileBlocked(tx, ty)) { toast('Blocked'); return; }
   const path = findPath(tx, ty);
   if (!path) { toast("Can't get there"); return; }
   pathQueue = path.slice(1);
+  tapMark = { x: tx, y: ty, t: 0 };
+  sfx('move', 0.25);
 }
 
 function findPath(tx, ty) {
@@ -148,6 +155,8 @@ export function worldKey(dx, dy) {
 // ------------------------------------------------------------------ Update
 export function worldUpdate(dt) {
   animT += dt;
+  if (tapMark) { tapMark.t += dt; if (tapMark.t > 0.7 && !pathQueue.length) tapMark = null; }
+  for (const e of G.world.enemies) if (e.alert > 0) e.alert -= dt;
   const p = G.player;
   if (!G.busy && !modalOpen()) {
     if (!p.moving && pathQueue.length) {
@@ -178,8 +187,10 @@ export function worldUpdate(dt) {
   centerCamera();
 }
 
+const DUST = ['#c7d97a', '#e8b878', '#ffffff'];
 function onStep() {
   G.steps++;
+  dust(G.player.fromX * TILE + 8, G.player.fromY * TILE + 15, DUST[G.world.biome[idx(G.player.x, G.player.y)]]);
   const before = day();
   if (G.steps % 5 === 0) for (const u of G.party) if (u.alive) u.hp = Math.min(maxHp(u), u.hp + 1);
   updateVisibility();
@@ -224,7 +235,10 @@ function moveEnemies() {
     const d = manhattan(e, p);
     if (d > 18) continue;
     const seen = visible.has(idx(e.x, e.y));
-    if (seen && d <= 6) e.chase = 7;
+    if (seen && d <= 6) {
+      if (!(e.chase > 0)) { e.alert = 1.2; sfx('alert', 0.3); }
+      e.chase = 7;
+    }
     if (e.chase > 0) {
       e.chase--;
       // slower packs pause occasionally so a careful player can slip away
@@ -265,14 +279,18 @@ function doInteract() {
 function engage(enemy) {
   G.busy = true;
   sfx('alert', 0.7);
-  enemy.alert = 0.6;
+  enemy.alert = 1.5;
+  shake(3, 0.3);
   setTimeout(() => {
-    G.busy = false;
-    startBattle({
-      members: enemy.members, name: enemy.name, anchor: { x: enemy.x, y: enemy.y }, tier: enemy.tier,
-      onWin: () => { enemy.alive = false; },
+    transition(() => {
+      G.busy = false;
+      startBattle({
+        members: enemy.members, name: enemy.name, anchor: { x: enemy.x, y: enemy.y }, tier: enemy.tier,
+        champion: enemy.champion, elite: !!enemy.champion, lootBonus: enemy.champion ? 1 : 0,
+        onWin: () => { enemy.alive = false; },
+      });
     });
-  }, 450);
+  }, 380);
 }
 
 export function stopWalking() { pathQueue = []; pendingInteract = null; }
@@ -281,9 +299,49 @@ export function stopWalking() { pathQueue = []; pendingInteract = null; }
 export function worldRender() {
   const w = G.world;
   drawGround(G.ground);
+  drawWaterShimmer();
+  drawPathPreview();
   drawWorldObjects(null);
+  drawParticles();
   drawFog(w, visible);
-  // biome label
+}
+
+function drawPathPreview() {
+  if (tapMark) {
+    const k = (Math.sin(tapMark.t * 10) + 1) / 2;
+    const [sx, sy] = toScreenTile(tapMark.x, tapMark.y);
+    const S = view.S;
+    ctx.strokeStyle = tapMark.hostile ? `rgba(255,90,80,${0.9 - k * 0.4})` : `rgba(255,240,180,${0.9 - k * 0.4})`;
+    ctx.lineWidth = S;
+    const inset = (1 + k * 2) * S;
+    ctx.strokeRect(sx + inset, sy + inset, TILE * S - inset * 2, TILE * S - inset * 2);
+  }
+  if (pathQueue.length) {
+    ctx.fillStyle = 'rgba(255,240,180,0.55)';
+    const S = view.S;
+    for (let i = 0; i < pathQueue.length; i++) {
+      const p = pathQueue[i];
+      const [sx, sy] = toScreenTile(p.x, p.y);
+      ctx.fillRect(sx + 7 * S, sy + 7 * S, 2 * S, 2 * S);
+    }
+  }
+}
+const toScreenTile = (x, y) => [Math.round((x * TILE - view.camX) * view.S), Math.round((y * TILE - view.camY) * view.S)];
+
+// twinkles on water tiles
+function drawWaterShimmer() {
+  const w = G.world, r = visibleTileRect(w), S = view.S;
+  const t = Math.floor(animT * 3);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
+    const i = idx(x, y);
+    if (w.terr[i] !== TERR.WATER || !w.explored[i]) continue;
+    const h = ((x * 73856093) ^ (y * 19349663) ^ (t * 83492791)) >>> 0;
+    if (h % 9 !== 0) continue;
+    const px = 3 + (h >> 4) % 10, py = 3 + (h >> 8) % 10;
+    const [sx, sy] = toScreenTile(x, y);
+    ctx.fillRect(sx + px * S, sy + py * S, 2 * S, S);
+  }
 }
 
 // Shared by battle: draws objects, POIs and given units sorted by depth.
@@ -307,9 +365,11 @@ export function drawWorldObjects(extraDrawables, opts = {}) {
       const frame = Math.floor(animT * 4 + e.x) % 4;
       list.push({
         z: e.ry + TILE * 2, draw: () => {
-          drawActor(e.leader, e.rx, e.ry, 0, e.leader.kind === 'monster' ? frame : 0, { ring: 'rgba(255,60,60,.35)' });
+          drawActor(e.leader, e.rx, e.ry, 0, e.leader.kind === 'monster' ? frame : 0, { ring: e.champion ? `rgba(255,200,60,${0.45 + Math.sin(animT * 5) * 0.2})` : 'rgba(255,60,60,.35)' });
           const n = e.members.length;
-          drawText(`${n}`, e.rx + 15, e.ry + 2, '#ffd27a', 6);
+          drawText(`${n}`, e.rx + 15, e.ry + 2, e.champion ? '#ffd23d' : '#ffd27a', 6);
+          if (e.champion) drawText('♛', e.rx + 8, e.ry - 4, '#ffd23d', 7);
+          if (e.alert > 0) drawIcon('Ui/Emote/emote22.png', e.rx + 2, e.ry - 17 - Math.max(0, e.alert - 1) * 10, 12);
         },
       });
     }

@@ -10,6 +10,7 @@ import * as screens from './screens.js';
 import { makeHero, makeConsumable } from './units.js';
 import { modalOpen } from './ui.js';
 import { TILE } from './data.js';
+import { updateJuice, applyShake, restoreShake, drawScreenFx, drawParticles, juice, particle, transition } from './fx.js';
 
 screens.bindApi({
   newRun, resumeRun, returnToWorld, toTitle, startBattle, tileBlocked,
@@ -44,7 +45,7 @@ function resumeRun() {
 
 function returnToWorld() {
   stopWalking();
-  enterWorld();
+  transition(() => enterWorld());
 }
 
 function toTitle() {
@@ -61,21 +62,39 @@ function setupTitleWorld() {
   view.S = Math.max(2, Math.round(3 * view.dpr));
 }
 
+// falling sakura petals + dim vignette behind the title
+let petalT = 0;
+function titleAmbience(dt) {
+  petalT += dt;
+  if (petalT > 0.12) {
+    petalT = 0;
+    particle({
+      x: view.camX + Math.random() * (view.w / view.S) + 40, y: view.camY - 10, vx: -14 - Math.random() * 12, vy: 14 + Math.random() * 10,
+      life: 9, size: 2, color: Math.random() < 0.5 ? '#ffb7c9' : '#ffd8e2', drag: 1, g: 0,
+    });
+  }
+}
+
 // ------------------------------------------------------------------ Loop
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   ctx.imageSmoothingEnabled = false;
-  if (G.scene === 'world') { worldUpdate(dt); worldRender(); }
-  else if (G.scene === 'battle') { battleUpdate(dt); battleRender(); }
+  updateJuice(dt);
+  const sdt = juice.freeze > 0 ? 0 : dt; // hit-stop
+  if (G.scene === 'world') { worldUpdate(sdt); applyShake(); worldRender(); restoreShake(); }
+  else if (G.scene === 'battle') { battleUpdate(sdt); applyShake(); battleRender(); restoreShake(); }
   else if (G.ground && G.world) {
     titleT += dt;
     view.camX = G.world.W * TILE / 2 - view.w / view.S / 2 + Math.sin(titleT * 0.05) * 200;
     view.camY = G.world.H * TILE / 2 - view.h / view.S / 2 + Math.cos(titleT * 0.04) * 160;
     drawGround(G.ground);
     drawWorldObjects([], { battle: true });
+    drawParticles();
+    titleAmbience(dt);
   } else { ctx.fillStyle = '#1b1a24'; ctx.fillRect(0, 0, view.w, view.h); }
+  drawScreenFx(dt);
   requestAnimationFrame(frame);
 }
 

@@ -14,22 +14,25 @@ import { rand, RNG } from './rng.js';
 import { TRAVEL_EVENTS, WANDERER_EVENTS, SHRINE_EVENT } from './events.js';
 import { tierAt, makeGroup } from './worldgen.js';
 import { BIOME } from './tiles.js';
+import { levelUpFx, banner, coins, sparks, shake } from './fx.js';
 
 // late-bound to avoid import cycles
 let api = {};
 export function bindApi(a) { api = a; }
 
 // ------------------------------------------------------------------ HUD
+let lastGold = 0;
 export function renderHud() {
   clearHud();
   if (G.scene !== 'world' && G.scene !== 'battle') return;
   const hud = hudContainer();
   const stats = h('div', { class: 'panel hud-stats' },
-    h('span', {}, h('img', { src: url('Items/Object/MoneyBag.png'), class: 'icon' }), ` ${G.gold}`),
+    h('span', { class: G.gold !== lastGold ? 'pop' : '' }, h('img', { src: url('Items/Object/MoneyBag.png'), class: 'icon' }), ` ${G.gold}`),
     h('span', {}, `Day ${day()}`));
   const party = h('div', { class: 'hud-party' },
-    G.party.map((u) => h('div', { class: `hud-member ${u.alive ? '' : 'dead'}`, onClick: () => { if (G.scene === 'world') showParty(u); } },
+    G.party.map((u) => h('div', { class: `hud-member ${u.alive ? '' : 'dead'} ${u.alive && u.hp / maxHp(u) < 0.3 ? 'danger' : ''}`, onClick: () => { if (G.scene === 'world') showParty(u); } },
       h('img', { src: faceUrl(spriteOf(u)), alt: u.name }), hpBar(u))));
+  lastGold = G.gold;
   add(hud, stats, party, h('div', { class: 'right' }, button('≡', showMenu, 'small')));
   if (G.scene === 'world') {
     const bar = bottomBar();
@@ -342,6 +345,8 @@ function openChest(poi) {
   api.refreshWorld();
   G.stats.chests++;
   sfx('bonus', 0.7);
+  sparks(poi.x * 16 + 8, poi.y * 16 + 8, '#ffd23d', 18);
+  coins(poi.x * 16 + 8, poi.y * 16 + 6, 12);
   if (rand.chance(0.12)) {
     for (const u of G.party) u.hp = Math.max(1, u.hp - 3);
     toast('A trapped chest! Needles fly out. (-3 HP all)');
@@ -544,8 +549,15 @@ export function showVictory({ gold, results, fallen, tier, elite, lootBonus, nam
   const nLoot = (elite ? 2 : 0) + (rand.chance(lootChance) ? 1 : 0) + (lootBonus && rand.chance(0.5) ? 1 : 0);
   for (let i = 0; i < nLoot; i++) loot.push(randomLoot(Math.max(1, Math.min(5, tier + (elite ? 1 : 0) - (rand.chance(0.35) ? 1 : 0)))));
   for (const it of loot) addToBag(it);
-  if (results.some((r) => r.lvl)) sfx('jingle_levelup', 0.7);
   api.returnToWorld();
+  const leveled = results.filter((r) => r.lvl);
+  if (leveled.length) {
+    setTimeout(() => {
+      sfx('jingle_levelup', 0.7);
+      levelUpFx(G.player.x * 16 + 8, G.player.y * 16 + 8);
+      banner('LEVEL UP!', { color: '#8fe07a', sub: leveled.map((r) => `${r.u.name} → Lv ${r.lvl.level}`).join('  '), dur: 1.8 });
+    }, 450);
+  }
   openModal(h('div', { class: 'col' },
     h('h2', {}, 'Victory!'),
     h('div', {}, h('img', { src: url('Items/Object/MoneyBag.png'), style: { width: '20px', verticalAlign: 'middle' } }), ` +${gold} gold`),
